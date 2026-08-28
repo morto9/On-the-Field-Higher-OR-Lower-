@@ -16,7 +16,7 @@
 export const FETCHED_AT = "2026-08-28";
 
 export const ROSTER = {
-  "Achraf Hakimi": { club: "PSG", age: 27, photo: "https://media.api-sports.io/football/players/9.png", local: "/players/achraf-hakimi.png" },
+  "Achraf Hakimi": { club: "PSG", age: 27, photo: "https://media.api-sports.io/football/players/9.png", local: "/players/achraf-hakimi.webp" },
   "Ademola Lookman": { club: "Atlético", age: 28, photo: "https://media.api-sports.io/football/players/18767.png", local: "/players/ademola-lookman.png" },
   "Alexander Isak": { club: "Liverpool", age: 26, photo: "https://media.api-sports.io/football/players/2864.png", local: "/players/alexander-isak.png" },
   "Amad Diallo": { club: "Man United", age: 23, photo: "https://media.api-sports.io/football/players/157997.png", local: "/players/amad-diallo.png" },
