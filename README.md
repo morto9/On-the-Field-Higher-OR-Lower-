@@ -238,6 +238,36 @@ screen; `--no-wikipedia` avoids them entirely at the cost of a few monograms.
 API-Football's portraits come under their own terms — check what your plan allows
 for redistribution.
 
+### The landing backdrop
+
+The intro screen paints a match photo behind the title. Drop yours in at:
+
+```
+public/landing.jpg
+```
+
+That path is all the wiring there is — `LANDING_IMAGE` at the top of `App.jsx`
+points at it, and Vite copies `public/` through to the build untouched. **No file
+is committed**, and none is required: without one the CSS paints nothing over the
+existing gradient and the screen looks as it always did.
+
+It is composited rather than dropped in raw, because a lit pitch under white
+type is a legibility problem: the photo is desaturated and held back to 62%
+opacity, drifting on the same slow ken-burns the player panels use, under a
+two-part scrim — a vertical wash that goes heaviest at the top and bottom where
+the small type sits, and a vignette pulling the eye to the middle. The type also
+carries a shadow, so swapping in a brighter or busier photo doesn't undo it.
+
+Tuning, if yours needs different treatment: `backgroundPosition` (currently
+`50% 42%`, which keeps the horizon off the headline), the `opacity` and `filter`
+on the photo layer, and the two gradient stops below it.
+
+Around 1600px wide and under ~300kB is plenty — it is the first thing anyone
+loads, and it sits behind a scrim that hides fine detail anyway.
+
+**It's a photograph, so somebody owns it.** Use one you shot, one you've
+licensed, or one under terms that permit this.
+
 ### Sound
 
 Everything is synthesised at runtime in the Web Audio API. No audio files.

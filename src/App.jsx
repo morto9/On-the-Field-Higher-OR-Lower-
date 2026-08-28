@@ -48,6 +48,12 @@ const DISPLAY =
 const BODY = '"Inter","Helvetica Neue",Helvetica,Arial,system-ui,sans-serif';
 const LED = '"SF Mono",ui-monospace,"Roboto Mono",Menlo,Consolas,monospace';
 
+/* Landing backdrop. Dropped in at public/landing.jpg, so it is served from
+ * our own origin like everything else. Absent, the CSS below simply paints
+ * nothing over the gradient and the intro looks as it always did — the
+ * screen never depends on the file being there. */
+const LANDING_IMAGE = "/landing.jpg";
+
 /* ------------------------------------------------------------------ *
  *  SOUND — synthesised at runtime. Filtered noise for the crowd,
  *  oscillators for the whistle, ticker and stings. No audio files.
@@ -878,13 +884,58 @@ export default function App() {
       {/* ---------------- intro ---------------- */}
       {screen === "intro" && (
         <div
-          className="absolute inset-0 z-50 flex flex-col items-center justify-center px-7 text-center"
+          className="absolute inset-0 z-50 flex flex-col items-center justify-center px-7 text-center overflow-hidden"
           style={{
             background:
               "radial-gradient(90% 60% at 50% 20%, #14203A 0%, #05070D 70%)",
           }}
         >
-          <div style={{ animation: "bootIn 520ms ease both" }}>
+          {/* Match photo, treated like the player panels rather than dropped
+              in raw: desaturated, held well back, and drifting slowly so the
+              screen has some life before kick off. */}
+          <div
+            aria-hidden
+            className="absolute inset-0 pointer-events-none"
+            style={{
+              backgroundImage: `url(${LANDING_IMAGE})`,
+              backgroundSize: "cover",
+              backgroundPosition: "50% 42%",
+              filter: "saturate(0.62) contrast(1.04) brightness(0.88)",
+              opacity: 0.62,
+              animation: "kenburns 26s ease-in-out infinite alternate",
+            }}
+          />
+
+          {/* Scrim. The photo is a bright green pitch under floodlights and
+              the copy is thin white type, so legibility has to be bought
+              back deliberately: a dark wash, heavier top and bottom, plus a
+              vignette to pull the eye into the middle. */}
+          <div
+            aria-hidden
+            className="absolute inset-0 pointer-events-none"
+            style={{
+              background:
+                "linear-gradient(180deg, rgba(5,7,13,0.72) 0%, rgba(5,7,13,0.34) 30%, rgba(5,7,13,0.40) 60%, rgba(5,7,13,0.88) 100%)",
+            }}
+          />
+          <div
+            aria-hidden
+            className="absolute inset-0 pointer-events-none"
+            style={{
+              background:
+                "radial-gradient(75% 60% at 50% 42%, rgba(5,7,13,0) 0%, rgba(5,7,13,0.34) 72%, rgba(5,7,13,0.70) 100%)",
+            }}
+          />
+
+          {/* The scrim is tuned for this photo, but a shadow on the type
+              means legibility survives swapping in a brighter or busier one. */}
+          <div
+            className="relative"
+            style={{
+              animation: "bootIn 520ms ease both",
+              textShadow: "0 2px 20px rgba(5,7,13,0.9), 0 1px 3px rgba(5,7,13,0.75)",
+            }}
+          >
             <div
               className="uppercase mb-3"
               style={{ fontSize: 10, letterSpacing: "0.42em", color: "#F5A524" }}
@@ -910,7 +961,7 @@ export default function App() {
                 maxWidth: 300,
                 fontSize: 14,
                 lineHeight: 1.6,
-                color: "rgba(255,255,255,0.68)",
+                color: "rgba(255,255,255,0.78)",
               }}
             >
               One player's market value is on the board. Call whether the next one is
@@ -934,7 +985,7 @@ export default function App() {
             </button>
             <p
               className="mt-7 uppercase"
-              style={{ fontSize: 9, letterSpacing: "0.24em", color: "rgba(255,255,255,0.32)" }}
+              style={{ fontSize: 9, letterSpacing: "0.24em", color: "rgba(255,255,255,0.44)" }}
             >
               Squads &amp; photos via API-Football · values via Transfermarkt
             </p>
