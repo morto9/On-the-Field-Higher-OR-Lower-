@@ -27,6 +27,7 @@ production deploy needs no environment, no API key and no serverless runtime.
 index.html
 src/data/squad.js   curated: valuations, kits, flags, name matching
 src/data/roster.js  generated: club, age, portrait — committed, not fetched
+src/data/teams.js   generated: club -> API-Football team id, hand-editable
 public/players/     downloaded portraits, served from our own origin
 src/App.jsx         the game — audio engine and UI
 src/main.jsx        mount
@@ -57,13 +58,24 @@ data is exactly as fresh as the last time you ran a refresh — which is the rig
 trade here, because neither source changes fast.
 
 ```bash
-npm run refresh-squad  -- --write   # API-Football: club, age, portrait URLs
-npm run fetch-photos   -- --write   # download those portraits into public/
-npm run refresh-values -- --write   # Transfermarkt: valuations
+npm run refresh-squad:teams    # once: resolve club -> team id, and commit
+npm run refresh-squad:write    # API-Football: club, age, portrait URLs
+npm run fetch-photos:write     # download those portraits into public/
+npm run refresh-values:write   # Transfermarkt: valuations
 ```
 
-All three are dry runs by default: they print what they would do and change
-nothing until you pass `--write`. Read it, run `npm run check`, commit.
+Drop the `:write` for a dry run — it prints what it would do and changes
+nothing. Read it, run `npm run check`, commit.
+
+The `:write` scripts exist because `npm run x -- --write` is unreliable:
+npm on PowerShell can eat the flag, warn `Unknown cli config "--write"`, and
+run the dry version. If you see that warning, use the `:write` script.
+
+**Rate limits.** The free tier allows 10 requests a minute, so calls are paced
+and a full refresh takes a few minutes — that is the throttle working, not a
+hang. A 429 is retried, with `Retry-After` honoured. `--rpm N` raises the pace
+on a paid plan. Run `refresh-squad:teams` once and commit `src/data/teams.js`;
+every later refresh then costs one call per club instead of two.
 
 **A fresh clone has no portraits.** `src/data/roster.js` ships empty, so every
 player falls back to the shirt-back monogram until you run the first two
@@ -115,11 +127,39 @@ refuses to overwrite a healthy `roster.js` with a run that resolved less than
 half the squad — a quota wall part-way through shouldn't cost you the file.
 `--force` overrides that if the shrinkage is real.
 
+Each club's line shows how many curated players it matched out of the squad
+size, and flags the count when it differs from what we curate for that club —
+which is how you spot a club resolving to the wrong team.
+
 Names are the fragile part, because the two sources spell them differently.
-`matchPlayer` tries three widths, narrowest first: the full name, then initial
-plus surname (so API-Football's `"L. Yamal"` finds `"Lamine Yamal"`), then the
-surname alone when it's unambiguous in our list. Accents are stripped on both
+`matchPlayer` tries two widths: the full name, then initial plus surname (so
+API-Football's `"L. Yamal"` finds `"Lamine Yamal"`). Accents are stripped on both
 sides, so `"Vinicius Junior"` and `"Vinícius Júnior"` land together.
+
+**There is deliberately no surname-only fallback.** It looks harmless against one
+player and isn't: the match runs over every member of every squad — hundreds of
+names — and surnames collide. Barcelona's Iñigo Martínez was matching Inter's
+Lautaro Martínez that way, dealing one player's portrait against another's
+valuation with nothing on screen to show it. A missed player costs a monogram; a
+wrong match corrupts the game invisibly, so the loose path is gone.
+
+Two further guards, because a silent wrong answer is the failure mode that
+matters here:
+
+- An initial+surname key shared by two curated players is dropped rather than
+  resolved by guesswork.
+- If two squads both claim the same player, the refresh reports it and prefers
+  the exact name match instead of letting the later club win.
+
+Club changes are reported separately, so a real transfer is visible in the run
+and a bad match doesn't hide among them.
+
+Team lookup is scored rather than exact-matched — API-Football calls Bayern
+"Bayern München", which no exact test on "Bayern Munich" will ever find — and
+reserve, youth and women's sides are pushed down so they can't win a tie. Every
+run prints the team it resolved to, and `teams.js` records the name alongside the
+id: a club quietly resolving to the wrong side is the failure that looks like no
+failure. If one is wrong, correct the id by hand and it's used as given.
 
 #### refresh-values
 

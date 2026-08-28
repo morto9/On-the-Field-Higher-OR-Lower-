@@ -16,10 +16,22 @@
  * someone else's CDN; run scripts/fetch-photos.mjs afterwards to take local
  * copies. A copy already taken is preserved here unless its source moved.
  *
- *   npm run refresh-squad                    # dry run, prints the diff
- *   npm run refresh-squad -- --write         # applies it
- *   npm run refresh-squad -- --limit 3       # first three clubs, a smoke test
- *   npm run refresh-squad -- --no-wikipedia  # API-Football portraits only
+ *   npm run refresh-squad:teams   # resolve club -> team id, once, and commit
+ *   npm run refresh-squad         # dry run, prints the diff
+ *   npm run refresh-squad:write   # applies it
+ *
+ * Flags (usable directly, or after `--` if your shell passes it through):
+ *   --write          apply, rather than printing what would change
+ *   --teams          only resolve team ids, and write src/data/teams.js
+ *   --limit N        first N clubs, for a smoke test
+ *   --no-wikipedia   API-Football portraits only
+ *   --rpm N          requests per minute (default 10, the free tier limit)
+ *
+ * On rate limits: the free plan allows 10 requests a minute, and a full
+ * refresh needs one or two per club. Calls are therefore paced, and a 429
+ * is retried rather than dropped — a refresh takes a few minutes and does
+ * not need supervising. Run `--teams` once and commit the result; every
+ * later refresh then costs one call per club instead of two.
  *
  * Needs API_FOOTBALL_KEY. Either export it or, with Node 22:
  *
@@ -29,37 +41,81 @@ import { readFile, writeFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
-import { CURATED, CLUBS, CLUB_QUERY, matchPlayer } from "../src/data/squad.js";
+import { CURATED, CLUBS, CLUB_QUERY, matchDetail, normalize } from "../src/data/squad.js";
 import { ROSTER as PREVIOUS } from "../src/data/roster.js";
+import { TEAM_IDS, TEAM_NAMES } from "../src/data/teams.js";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const TARGET = join(HERE, "..", "src", "data", "roster.js");
+const TEAMS_FILE = join(HERE, "..", "src", "data", "teams.js");
 
 const HOST = process.env.API_FOOTBALL_HOST || "v3.football.api-sports.io";
-const KEY = process.env.API_FOOTBALL_KEY;
 
-const args = process.argv.slice(2);
-const flag = (n) => args.includes(n);
-const argOf = (n) => (args.indexOf(n) >= 0 ? args[args.indexOf(n) + 1] : null);
+/* Read at call time, not at import: --env-file and any wrapper that sets
+ * the variable get to run first. */
+const key = () => process.env.API_FOOTBALL_KEY;
 
-const WRITE = flag("--write");
-const NO_WIKI = flag("--no-wikipedia");
-const LIMIT = Number(argOf("--limit")) || 0;
+/* Read at call time, for the same reason the key is: a caller — the test
+ * suite included — gets to set argv before main runs. */
+const argv = () => process.argv.slice(2);
+const flag = (n) => argv().includes(n);
+const argOf = (n) => {
+  const a = argv();
+  const i = a.indexOf(n);
+  return i >= 0 ? a[i + 1] : null;
+};
+
+const WRITE = () => flag("--write");
+const NO_WIKI = () => flag("--no-wikipedia");
+const TEAMS_ONLY = () => flag("--teams");
+const LIMIT = () => Number(argOf("--limit")) || 0;
+const RPM = () => Number(argOf("--rpm")) || 10;
+
+/* The free plan allows 10 requests a minute and answers 429 the moment
+ * you exceed it, so the gap is derived from --rpm rather than discovered
+ * the hard way. */
+const gapMs = () => Math.ceil(60000 / Math.max(1, RPM()));
 
 /* RapidAPI fronts the same API behind different auth headers. */
 const authHeaders = () =>
   HOST.includes("rapidapi")
-    ? { "x-rapidapi-key": KEY, "x-rapidapi-host": HOST }
-    : { "x-apisports-key": KEY };
+    ? { "x-rapidapi-key": key(), "x-rapidapi-host": HOST }
+    : { "x-apisports-key": key() };
 
 let calls = 0;
 
-async function call(path) {
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+let lastCall = 0;
+
+async function throttle() {
+  const wait = lastCall + gapMs() - Date.now();
+  if (wait > 0) await sleep(wait);
+  lastCall = Date.now();
+}
+
+/* A 429 is a "come back shortly", not a failure. Honour Retry-After when
+ * they send one, otherwise back off and try again; only a run of them is
+ * treated as fatal for that club. */
+async function call(path, attempt = 1) {
+  await throttle();
   calls++;
+
   const res = await fetch(`https://${HOST}/${path}`, {
     headers: { ...authHeaders(), Accept: "application/json" },
   });
+
+  if (res.status === 429) {
+    if (attempt > 4) throw new Error(`rate limited after ${attempt} attempts on ${path}`);
+    const after = Number(res.headers.get("retry-after"));
+    const backoff = Number.isFinite(after) && after > 0 ? after * 1000 : gapMs() * 2 ** attempt;
+    process.stdout.write(`    rate limited, waiting ${Math.round(backoff / 1000)}s\n`);
+    await sleep(backoff);
+    return call(path, attempt + 1);
+  }
+
   if (!res.ok) throw new Error(`HTTP ${res.status} on ${path}`);
+
   const body = await res.json();
   // API-Football answers 200 with a populated `errors` field for auth and
   // quota problems, so res.ok alone is not success.
@@ -69,30 +125,60 @@ async function call(path) {
   return Array.isArray(body?.response) ? body.response : [];
 }
 
-/* Our display names are short ("Man City", "Atlético"); theirs are not.
- * Search under the mapped name and prefer an exact hit, so "Inter" doesn't
- * resolve to some third-tier namesake. */
+/* Our display names are short ("Man City", "Atlético"); theirs are not,
+ * and they are not always what we would guess either — "Bayern Munich" is
+ * "Bayern München" to them. So score the hits instead of demanding an
+ * exact string, and always report what was chosen: a club silently
+ * resolving to a reserve side is the failure that looks like no failure.
+ *
+ * Returns { id, name, exact } or null. */
 async function resolveTeam(club) {
+  const known = TEAM_IDS[club];
+  if (known) return { id: known, name: TEAM_NAMES[club] || "(from teams.js)", exact: true, cached: true };
+
   const query = CLUB_QUERY[club] || club;
   const hits = await call(`teams?search=${encodeURIComponent(query)}`);
   if (!hits.length) return null;
-  const want = query.toLowerCase();
-  const exact = hits.find((h) => (h.team?.name || "").toLowerCase() === want);
-  return (exact || hits[0]).team?.id ?? null;
+
+  const want = normalize(query);
+  const wanted = new Set(want.split(" ").filter(Boolean));
+
+  /* Prefer, in order: the same name, a name containing all our words, a
+   * name sharing most words. Reserve and youth sides are pushed down —
+   * they carry the parent's name and would otherwise win on a tie. */
+  const scored = hits.map((h) => {
+    const name = h.team?.name || "";
+    const n = normalize(name);
+    const words = new Set(n.split(" ").filter(Boolean));
+    const shared = [...wanted].filter((w) => words.has(w)).length;
+
+    let score = shared / Math.max(1, wanted.size);
+    if (n === want) score += 2;
+    else if (n.startsWith(want) || n.includes(want)) score += 1;
+    if (/\b(ii|b|u1[6-9]|u2[0-3]|reserve|women|fem)\b/.test(n)) score -= 3;
+    if (h.team?.national) score -= 2;
+
+    return { id: h.team?.id, name, score, exact: n === want };
+  });
+
+  scored.sort((a, b) => b.score - a.score);
+  const best = scored[0];
+  return best && best.id ? best : null;
 }
 
 async function fetchClub(club) {
-  const id = await resolveTeam(club);
-  if (!id) return { club, found: [], why: "no team id" };
+  const team = await resolveTeam(club);
+  if (!team) return { club, found: [], why: "no team id" };
 
-  const squads = await call(`players/squads?team=${id}`);
+  const squads = await call(`players/squads?team=${team.id}`);
   const roster = squads?.[0]?.players;
-  if (!Array.isArray(roster)) return { club, found: [], why: "no squad returned" };
+  if (!Array.isArray(roster)) return { club, found: [], team, why: "no squad returned" };
 
   const found = [];
   for (const person of roster) {
-    const curated = matchPlayer(person.name);
-    if (!curated) continue; // not one of ours
+    const detail = matchDetail(person.name);
+    if (!detail) continue; // not one of ours
+    const curated = detail.player;
     const photo = person.photo || null;
     const prev = PREVIOUS[curated.name];
 
@@ -106,9 +192,14 @@ async function fetchClub(club) {
        * the remote URL changed, the copy is stale, so drop it and let
        * fetch-photos pull the new one. */
       local: prev && prev.local && prev.photo === photo ? prev.local : null,
+      /* Kept for the caller, not for roster.js: how sure the name match
+       * was, and where we expected this player to be. */
+      _precision: detail.precision,
+      _curatedClub: curated.club,
+      _apiName: person.name,
     });
   }
-  return { club, found };
+  return { club, found, team, squadSize: roster.length };
 }
 
 /* ------------------------------------------------------------------ *
@@ -150,6 +241,37 @@ async function wikipediaPhoto(name) {
  *  Generating roster.js. Keys are sorted so a refresh that changes one
  *  player produces a one-line diff rather than a reshuffled file.
  * ------------------------------------------------------------------ */
+export function renderTeams(ids, names) {
+  const clubs = Object.keys(ids).sort((a, b) => a.localeCompare(b));
+  const line = (m) => clubs.map((c) => `  ${JSON.stringify(c)}: ${JSON.stringify(m[c])},`).join("\n");
+
+  return `/* ------------------------------------------------------------------ *
+ *  TEAM IDS — our club names to API-Football's numeric team ids.
+ *
+ *  Generated by \`npm run refresh-squad:teams\`, then committed. Caching
+ *  them halves the cost of every later refresh: a squad fetch needs the
+ *  id, and looking it up is a second request per club against a free
+ *  tier of 100 a day.
+ *
+ *  Safe to edit by hand. If a club resolved to the wrong team — a
+ *  reserve side, a namesake in another country — correct the number here
+ *  and the refresh will use it as given, without searching again.
+ *
+ *  Empty is fine: any club missing from this map is looked up on demand.
+ * ------------------------------------------------------------------ */
+export const TEAM_IDS = {
+${line(ids)}
+};
+
+/* What each id resolved to, for eyeballing. Not used at runtime — it is
+ * here so a wrong mapping is obvious in review rather than showing up as
+ * a club that mysteriously returns no players. */
+export const TEAM_NAMES = {
+${line(names)}
+};
+`;
+}
+
 export function renderRoster(entries, fetchedAt) {
   const names = Object.keys(entries).sort((a, b) => a.localeCompare(b));
   const body = names
@@ -191,8 +313,8 @@ ${body}
 
 /* ------------------------------------------------------------------ */
 
-async function main() {
-  if (!KEY) {
+export async function main() {
+  if (!key()) {
     console.error(
       "API_FOOTBALL_KEY is not set.\n" +
         "Copy .env.example to .env, add your key, and run:\n" +
@@ -201,20 +323,97 @@ async function main() {
     process.exit(1);
   }
 
-  const clubs = LIMIT ? CLUBS.slice(0, LIMIT) : CLUBS;
-  console.log(`Fetching ${clubs.length} club(s) from API-Football\n`);
+  const clubs = LIMIT() ? CLUBS.slice(0, LIMIT()) : CLUBS;
+
+  if (TEAMS_ONLY()) {
+    console.log(`Resolving ${clubs.length} club(s) to team ids, ~${gapMs() / 1000}s apart\n`);
+    const ids = { ...TEAM_IDS };
+    const names = { ...TEAM_NAMES };
+    const unsure = [];
+
+    for (const club of clubs) {
+      try {
+        const t = await resolveTeam(club);
+        if (!t) {
+          console.log(`  ${club.padEnd(16)} not found`);
+          continue;
+        }
+        ids[club] = t.id;
+        names[club] = t.name;
+        const mark = t.cached ? "cached" : t.exact ? "exact " : "fuzzy ";
+        if (!t.cached && !t.exact) unsure.push(`${club} -> ${t.name}`);
+        console.log(`  ${club.padEnd(16)} ${mark}  ${String(t.id).padStart(6)}  ${t.name}`);
+      } catch (e) {
+        console.log(`  ${club.padEnd(16)} failed — ${e.message}`);
+      }
+    }
+
+    if (unsure.length) {
+      console.log(`\n  ! check these — the name is not an exact match:`);
+      for (const u of unsure) console.log(`      ${u}`);
+      console.log(`    Wrong? Edit the id in src/data/teams.js; it is used as given.`);
+    }
+
+    if (!WRITE()) {
+      console.log(`\nDry run. Re-run with --write to save src/data/teams.js.`);
+      return;
+    }
+    await writeFile(TEAMS_FILE, renderTeams(ids, names));
+    console.log(`\nWrote ${Object.keys(ids).length} team id(s) to ${TEAMS_FILE}`);
+    console.log("Review the names, then commit. Later refreshes reuse these.");
+    return;
+  }
+
+  const cached = clubs.filter((c) => TEAM_IDS[c]).length;
+  console.log(
+    `Fetching ${clubs.length} club(s) from API-Football at ${RPM()}/min` +
+      (cached ? ` (${cached} team id(s) cached)` : "") +
+      `\n`
+  );
 
   const entries = {};
   const clubProblems = [];
+  const conflicts = [];
+  const transfers = [];
+  const resolvedTeams = { ...TEAM_IDS };
+  const resolvedNames = { ...TEAM_NAMES };
 
   // Sequential on purpose: a refresh is not in a hurry, and the smaller
   // plans rate-limit per minute.
   for (const club of clubs) {
     try {
-      const { found, why } = await fetchClub(club);
+      const { found, why, team, squadSize } = await fetchClub(club);
       if (why) clubProblems.push(`${club}: ${why}`);
-      for (const p of found) entries[p.name] = p;
-      process.stdout.write(`  ${club.padEnd(16)} ${found.length} player(s)\n`);
+      if (team) {
+        resolvedTeams[club] = team.id;
+        resolvedNames[club] = team.name;
+      }
+
+      for (const p of found) {
+        const seen = entries[p.name];
+        if (seen && seen.club !== p.club) {
+          /* Two squads both claim him. Prefer the exact name match; if
+           * they are equally confident, keep the first and say so rather
+           * than picking silently. */
+          const better = p._precision === "full" && seen._precision !== "full";
+          conflicts.push(
+            `${p.name}: ${seen.club} ("${seen._apiName}", ${seen._precision}) vs ` +
+              `${p.club} ("${p._apiName}", ${p._precision}) — kept ${better ? p.club : seen.club}`
+          );
+          if (!better) continue;
+        }
+        if (p._curatedClub !== p.club) {
+          transfers.push(`${p.name}: ${p._curatedClub} -> ${p.club}`);
+        }
+        entries[p.name] = p;
+      }
+
+      const expected = CURATED.filter((c) => c.club === club).length;
+      const note = found.length === expected ? "" : `  (curated: ${expected})`;
+      process.stdout.write(
+        `  ${club.padEnd(16)} ${String(found.length).padStart(2)} of ${String(squadSize ?? "?").padStart(2)}` +
+          `  ${team ? team.name : "—"}${note}\n`
+      );
     } catch (e) {
       clubProblems.push(`${club}: ${e.message}`);
       process.stdout.write(`  ${club.padEnd(16)} failed — ${e.message}\n`);
@@ -222,7 +421,7 @@ async function main() {
   }
 
   const noPhoto = Object.values(entries).filter((e) => !e.photo);
-  if (noPhoto.length && !NO_WIKI) {
+  if (noPhoto.length && !NO_WIKI()) {
     console.log(`\nAsking Wikipedia for ${noPhoto.length} missing portrait(s)`);
     for (const e of noPhoto) {
       e.photo = await wikipediaPhoto(e.name);
@@ -262,6 +461,14 @@ async function main() {
     console.log(`\n  ! club problems:`);
     for (const p of clubProblems) console.log(`      ${p}`);
   }
+  if (conflicts.length) {
+    console.log(`\n  ! ${conflicts.length} player(s) claimed by two squads:`);
+    for (const c of conflicts) console.log(`      ${c}`);
+  }
+  if (transfers.length) {
+    console.log(`\n  ${transfers.length} club change(s) — check these are real transfers:`);
+    for (const t of transfers) console.log(`      ${t}`);
+  }
   if (changes.length) {
     console.log(`\n  changes vs the committed roster:`);
     for (const c of changes.slice(0, 40)) console.log(`      ${c}`);
@@ -282,16 +489,26 @@ async function main() {
     process.exit(1);
   }
 
-  if (!WRITE) {
+  if (!WRITE()) {
     console.log(`\nDry run. Re-run with --write to apply.`);
     return;
   }
-  if (LIMIT) {
+  if (LIMIT()) {
     console.error(`\nRefusing to write a --limit run: it would drop the clubs it skipped.`);
     process.exit(1);
   }
 
-  await writeFile(TARGET, renderRoster(entries, new Date().toISOString().slice(0, 10)));
+  /* Drop the bookkeeping fields; roster.js carries only what the game reads. */
+  const clean = {};
+  for (const [name, e] of Object.entries(entries)) {
+    clean[name] = { club: e.club, age: e.age, photo: e.photo, local: e.local };
+  }
+
+  await writeFile(TARGET, renderRoster(clean, new Date().toISOString().slice(0, 10)));
+  if (Object.keys(resolvedTeams).length) {
+    await writeFile(TEAMS_FILE, renderTeams(resolvedTeams, resolvedNames));
+    console.log(`Cached ${Object.keys(resolvedTeams).length} team id(s) to ${TEAMS_FILE}`);
+  }
   console.log(`\nWrote ${matched} player(s) to ${TARGET}`);
   console.log("Review the diff, run npm run check, then commit.");
 }

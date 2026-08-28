@@ -33,9 +33,9 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const ROSTER_FILE = join(HERE, "..", "src", "data", "roster.js");
 const OUT_DIR = join(HERE, "..", "public", "players");
 
-const args = process.argv.slice(2);
-const WRITE = args.includes("--write");
-const FORCE = args.includes("--force");
+/* Read at call time, not at import, so a caller can set argv first. */
+const WRITE = () => process.argv.slice(2).includes("--write");
+const FORCE = () => process.argv.slice(2).includes("--force");
 
 /* The filename is derived from the player's name, so it is stable across
  * runs and a re-download overwrites rather than accumulating. */
@@ -108,7 +108,7 @@ async function main() {
     const entry = ROSTER[name];
     if (!entry.photo) {
       noSource.push(name);
-    } else if (entry.local && !FORCE) {
+    } else if (entry.local && !FORCE()) {
       already.push(name);
     } else {
       todo.push(name);
@@ -121,11 +121,11 @@ async function main() {
   );
 
   if (!todo.length) {
-    console.log(FORCE ? "Nothing to do." : "Nothing to do. Pass --force to re-download.");
+    console.log(FORCE() ? "Nothing to do." : "Nothing to do. Pass --force to re-download.");
     return;
   }
 
-  if (!WRITE) {
+  if (!WRITE()) {
     for (const name of todo.slice(0, 15)) console.log(`  would fetch  ${name}`);
     if (todo.length > 15) console.log(`  … and ${todo.length - 15} more`);
     console.log(`\nDry run. Re-run with --write to download into public/players/.`);

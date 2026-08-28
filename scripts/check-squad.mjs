@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 import { CURATED, CLUBS, CLUB_QUERY, matchPlayer, mergeRoster } from "../src/data/squad.js";
-import { renderRoster } from "./refresh-squad.mjs";
+import { renderRoster, main as refreshSquad } from "./refresh-squad.mjs";
 import { slug, extensionFor } from "./fetch-photos.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
@@ -40,7 +40,13 @@ console.log("matchPlayer");
 check("full name", matchPlayer("Lamine Yamal")?.name, "Lamine Yamal");
 check("initial + surname", matchPlayer("L. Yamal")?.name, "Lamine Yamal");
 check("accents stripped", matchPlayer("Vinicius Junior")?.name, "Vinícius Júnior");
-check("surname alone", matchPlayer("Bellingham")?.name, "Jude Bellingham");
+/* Deliberately NOT matched. A surname-only fallback looks harmless and is
+ * not: run over every member of every squad it collides, and Barcelona's
+ * Iñigo Martínez was matching Inter's Lautaro Martínez — one player's
+ * portrait against another's valuation, silently. */
+check("surname alone is refused", matchPlayer("Bellingham"), null);
+check("a colliding surname is refused", matchPlayer("Iñigo Martínez"), null);
+check("an ambiguous initial+surname is refused", matchPlayer("R. Martinez"), null);
 check("a stranger is not matched", matchPlayer("Nobody Here"), null);
 check("mononyms match whole", matchPlayer("Alisson")?.name, "Alisson");
 check("a mononym is never abbreviated away", matchPlayer("A. "), null);
@@ -141,18 +147,35 @@ const clubForId = new Map([...idFor].map(([n, id]) => [id, n]));
 const strip = (s) => s.normalize("NFD").replace(/[̀-ͯ]/g, "");
 
 let apiCalls = 0;
+let rateLimitOnce = true;
+const noHeaders = { get: () => null };
+
 globalThis.fetch = async (url) => {
   const u = new URL(url);
   if (u.hostname.includes("wikipedia")) {
-    return { ok: true, json: async () => ({ thumbnail: { source: "https://w/240px-x.jpg" } }) };
+    return { ok: true, status: 200, headers: noHeaders, json: async () => ({ thumbnail: { source: "https://w/240px-x.jpg" } }) };
   }
   apiCalls++;
+
+  /* Answer 429 once, with a Retry-After, to prove the backoff path runs
+   * and the call is retried rather than dropped. */
+  if (rateLimitOnce && u.pathname.endsWith("/players/squads")) {
+    rateLimitOnce = false;
+    return { ok: false, status: 429, headers: { get: (h) => (h === "retry-after" ? "0" : null) }, json: async () => ({}) };
+  }
+
   if (u.pathname.endsWith("/teams")) {
     const q = u.searchParams.get("search");
     const id = idFor.get(q);
     return {
       ok: true,
-      json: async () => ({ errors: [], response: id ? [{ team: { id, name: q } }] : [] }),
+      status: 200,
+      headers: noHeaders,
+      // a reserve side is returned alongside the real club, and must lose
+      json: async () => ({
+        errors: [],
+        response: id ? [{ team: { id: 90000 + id, name: `${q} II` } }, { team: { id, name: q } }] : [],
+      }),
     };
   }
   if (u.pathname.endsWith("/players/squads")) {
@@ -174,26 +197,40 @@ globalThis.fetch = async (url) => {
       // every third player has no portrait, to exercise the Wikipedia pass
       photo: i % 3 === 0 ? null : `https://media.api-sports.io/football/players/${500 + i}.png`,
     }));
-    return { ok: true, json: async () => ({ errors: [], response: [{ players }] }) };
+    return { ok: true, status: 200, headers: noHeaders, json: async () => ({ errors: [], response: [{ players }] }) };
   }
   throw new Error("unexpected " + url);
 };
 
 process.env.API_FOOTBALL_KEY = "test-key";
+
+/* Call main() directly and await it, rather than importing for its side
+ * effect and hoping a timer outlasts it. Both streams are captured: the
+ * per-club lines go to stdout.write, the summary to console.log. */
 const log = [];
 const realLog = console.log;
+const realWrite = process.stdout.write.bind(process.stdout);
 console.log = (...a) => log.push(a.join(" "));
-process.argv = [process.argv[0], join(HERE, "refresh-squad.mjs")]; // no --write
-await import("./refresh-squad.mjs?run");
-await new Promise((r) => setTimeout(r, 50));
-console.log = realLog;
+process.stdout.write = (chunk) => (log.push(String(chunk).replace(/\n$/, "")), true);
+
+// --rpm is cranked so the throttle does not make the suite take minutes
+process.argv = [process.argv[0], join(HERE, "refresh-squad.mjs"), "--rpm", "60000"]; // no --write
+try {
+  await refreshSquad();
+} finally {
+  console.log = realLog;
+  process.stdout.write = realWrite;
+}
 
 const out = log.join("\n");
 check("resolves every curated player", out.includes(`${CURATED.length}/${CURATED.length} curated players resolved`), true);
 check("finds a portrait for all of them", out.includes(`${CURATED.length}/${CURATED.length} with a portrait`), true);
 check("reports its API spend", /\d+ API call\(s\) used/.test(out), true);
 check("stops at a dry run", out.includes("Dry run"), true);
-check("two calls per club", apiCalls, CLUBS.length * 2);
+check("two calls per club, plus the retried one", apiCalls, CLUBS.length * 2 + 1);
+check("a 429 is retried, not dropped", out.includes("rate limited"), true);
+check("picks the club over its reserve side", out.includes(" II") === false, true);
+check("writes nothing on a dry run", (await import("node:fs")).existsSync(join(HERE, "..", "src", "data", "teams.js")) , true);
 
 console.log(failed ? `\n${failed} check(s) failed` : "\nall checks passed");
 process.exit(failed ? 1 : 0);

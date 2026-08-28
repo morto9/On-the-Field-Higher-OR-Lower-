@@ -166,14 +166,20 @@ export const CURATED = [
  *  Joining a live squad to the valuations above means matching names
  *  written by two different sources. API-Football abbreviates some
  *  first names ("L. Yamal") and spells accents inconsistently, so the
- *  match is tried at three widths, narrowest first:
+ *  match is tried at two widths, narrowest first:
  *
  *    1. the whole name        lamine yamal
  *    2. initial + surname     l yamal
- *    3. surname alone         yamal      (only when unambiguous)
  *
  *  Accents are stripped on both sides, so "Vinícius" and "Vinicius"
  *  land on the same key.
+ *
+ *  There is deliberately no surname-only fallback. It looks harmless
+ *  against one player and is not: this runs over every member of every
+ *  squad — hundreds of names — and surnames collide. Barcelona's Iñigo
+ *  Martínez matched Inter's Lautaro Martínez that way, silently dealing
+ *  one player's portrait with another's valuation. A missed player costs
+ *  a monogram; a wrong match corrupts the game invisibly.
  * ------------------------------------------------------------------ */
 
 export function normalize(name) {
@@ -193,51 +199,47 @@ function initialKey(name) {
   return `${parts[0][0]} ${parts.slice(1).join(" ")}`;
 }
 
-function surnameKey(name) {
-  const parts = normalize(name).split(" ").filter(Boolean);
-  return parts.length ? parts[parts.length - 1] : null;
-}
-
 /* Build the three lookup tables once. A surname shared by two players
  * in the list is dropped from the surname table rather than guessed at. */
+/* An initial+surname key shared by two curated players is ambiguous, so
+ * it is dropped rather than resolved by guesswork. */
 function buildIndex(players) {
   const full = new Map();
   const initial = new Map();
-  const surnameCount = new Map();
-  const surname = new Map();
+  const initialCount = new Map();
 
   for (const p of players) {
     full.set(normalize(p.name), p);
     const ik = initialKey(p.name);
-    if (ik) initial.set(ik, p);
-    const sk = surnameKey(p.name);
-    if (sk) {
-      surnameCount.set(sk, (surnameCount.get(sk) || 0) + 1);
-      surname.set(sk, p);
+    if (ik) {
+      initialCount.set(ik, (initialCount.get(ik) || 0) + 1);
+      initial.set(ik, p);
     }
   }
-  for (const [key, n] of surnameCount) if (n > 1) surname.delete(key);
+  for (const [key, n] of initialCount) if (n > 1) initial.delete(key);
 
-  return { full, initial, surname };
+  return { full, initial };
 }
 
 const INDEX = buildIndex(CURATED);
 
-/* Returns the curated entry an API-Football name refers to, or null. */
-export function matchPlayer(name) {
+/* Returns the curated entry an API-Football name refers to, or null.
+ * matchDetail also says how confident the match was, which the refresh
+ * uses to break ties when two squads claim the same player. */
+export function matchDetail(name) {
   const f = INDEX.full.get(normalize(name));
-  if (f) return f;
+  if (f) return { player: f, precision: "full" };
+
   const ik = initialKey(name);
   if (ik) {
     const i = INDEX.initial.get(ik);
-    if (i) return i;
-  }
-  const sk = surnameKey(name);
-  if (sk) {
-    const s = INDEX.surname.get(sk);
-    if (s) return s;
+    if (i) return { player: i, precision: "initial" };
   }
   return null;
+}
+
+export function matchPlayer(name) {
+  return matchDetail(name)?.player ?? null;
 }
 
 /* ------------------------------------------------------------------ *

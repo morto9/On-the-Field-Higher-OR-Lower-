@@ -9,8 +9,12 @@
     "preview": "vite preview",
     "check": "node scripts/check-squad.mjs && node scripts/check-values.mjs",
     "refresh-squad": "node --env-file-if-exists=.env scripts/refresh-squad.mjs",
+    "refresh-squad:teams": "node --env-file-if-exists=.env scripts/refresh-squad.mjs --teams --write",
+    "refresh-squad:write": "node --env-file-if-exists=.env scripts/refresh-squad.mjs --write",
     "fetch-photos": "node scripts/fetch-photos.mjs",
-    "refresh-values": "node scripts/refresh-values.mjs"
+    "fetch-photos:write": "node scripts/fetch-photos.mjs --write",
+    "refresh-values": "node scripts/refresh-values.mjs",
+    "refresh-values:write": "node scripts/refresh-values.mjs --write"
   },
   "dependencies": {
     "lucide-react": "^0.383.0",
