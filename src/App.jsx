@@ -11,140 +11,7 @@ import {
   VolumeX,
 } from "lucide-react";
 
-/* ------------------------------------------------------------------ *
- *  KIT — club colour washes. Two stops per club, used as the panel
- *  gradient so every card is lit in the player's own colours.
- * ------------------------------------------------------------------ */
-const KIT = {
-  "Real Madrid": ["#5B5BD6", "#0A0E1C"],
-  "Barcelona": ["#1E40AF", "#6D1A2E"],
-  "Man City": ["#0EA5C4", "#062B3A"],
-  "Arsenal": ["#DC2626", "#3B0A0A"],
-  "Liverpool": ["#C0392B", "#2A0808"],
-  "Chelsea": ["#1D4ED8", "#08123A"],
-  "Man United": ["#E11D48", "#320810"],
-  "Tottenham": ["#3F4A5C", "#0B0F18"],
-  "Newcastle": ["#1F2937", "#050608"],
-  "Aston Villa": ["#6D1A3A", "#0F2A5C"],
-  "Crystal Palace": ["#1D4ED8", "#6D1A2E"],
-  "Brighton": ["#0284C7", "#062A45"],
-  "Nottm Forest": ["#DC2626", "#2A0606"],
-  "West Ham": ["#5B1220", "#0C3B4A"],
-  "Bournemouth": ["#B91C1C", "#0B1220"],
-  "Bayern": ["#DC2626", "#122A5C"],
-  "Dortmund": ["#CA8A04", "#141414"],
-  "Leverkusen": ["#DC2626", "#131313"],
-  "RB Leipzig": ["#B91C1C", "#0A1F3C"],
-  "Stuttgart": ["#B91C1C", "#111827"],
-  "PSG": ["#1E3A8A", "#5B1220"],
-  "Monaco": ["#B91C1C", "#1F2937"],
-  "Lyon": ["#1D4ED8", "#5B1220"],
-  "Inter": ["#0B1B4A", "#0A0A0A"],
-  "AC Milan": ["#C1121F", "#0A0A0A"],
-  "Juventus": ["#171717", "#3F3F46"],
-  "Napoli": ["#0284C7", "#062A45"],
-  "Atalanta": ["#1E3A8A", "#0A0A0A"],
-  "Atlético": ["#C1121F", "#132A5C"],
-  "Athletic Club": ["#C1121F", "#2A0606"],
-  "Real Sociedad": ["#1D4ED8", "#0B1220"],
-  "Villarreal": ["#CA8A04", "#1E3A8A"],
-  "Sporting CP": ["#166534", "#052012"],
-  "Benfica": ["#B91C1C", "#2A0606"],
-  "Ajax": ["#B91C1C", "#111827"],
-  "PSV": ["#B91C1C", "#0F172A"],
-  "Galatasaray": ["#CA8A04", "#6D1A2E"],
-  "Al-Nassr": ["#CA8A04", "#123A7A"],
-  "Al-Hilal": ["#1D4ED8", "#08123A"],
-  "Inter Miami": ["#E879A6", "#171717"],
-};
-
-const P = (name, club, pos, age, flag, value) => ({ name, club, pos, age, flag, value });
-
-/* Valuations are rounded market estimates, not official figures. */
-const SQUAD = [
-  P("Lamine Yamal", "Barcelona", "RW", 18, "🇪🇸", 180),
-  P("Jude Bellingham", "Real Madrid", "AM", 22, "🏴󠁧󠁢󠁥󠁮󠁧󠁿", 180),
-  P("Erling Haaland", "Man City", "ST", 25, "🇳🇴", 180),
-  P("Kylian Mbappé", "Real Madrid", "ST", 27, "🇫🇷", 170),
-  P("Vinícius Júnior", "Real Madrid", "LW", 25, "🇧🇷", 170),
-  P("Florian Wirtz", "Liverpool", "AM", 22, "🇩🇪", 140),
-  P("Jamal Musiala", "Bayern", "AM", 22, "🇩🇪", 140),
-  P("Pedri", "Barcelona", "CM", 23, "🇪🇸", 140),
-  P("Bukayo Saka", "Arsenal", "RW", 24, "🏴󠁧󠁢󠁥󠁮󠁧󠁿", 140),
-  P("Cole Palmer", "Chelsea", "AM", 23, "🏴󠁧󠁢󠁥󠁮󠁧󠁿", 130),
-  P("Phil Foden", "Man City", "AM", 25, "🏴󠁧󠁢󠁥󠁮󠁧󠁿", 120),
-  P("Federico Valverde", "Real Madrid", "CM", 27, "🇺🇾", 130),
-  P("Rodri", "Man City", "DM", 29, "🇪🇸", 110),
-  P("Declan Rice", "Arsenal", "DM", 27, "🏴󠁧󠁢󠁥󠁮󠁧󠁿", 110),
-  P("Martin Ødegaard", "Arsenal", "AM", 27, "🇳🇴", 100),
-  P("Lautaro Martínez", "Inter", "ST", 28, "🇦🇷", 100),
-  P("Rodrygo", "Real Madrid", "RW", 25, "🇧🇷", 90),
-  P("Eduardo Camavinga", "Real Madrid", "CM", 23, "🇫🇷", 90),
-  P("Alexander Isak", "Liverpool", "ST", 26, "🇸🇪", 90),
-  P("Moisés Caicedo", "Chelsea", "DM", 24, "🇪🇨", 90),
-  P("Julián Álvarez", "Atlético", "ST", 26, "🇦🇷", 90),
-  P("Gavi", "Barcelona", "CM", 21, "🇪🇸", 85),
-  P("Khvicha Kvaratskhelia", "PSG", "LW", 25, "🇬🇪", 85),
-  P("Harry Kane", "Bayern", "ST", 32, "🏴󠁧󠁢󠁥󠁮󠁧󠁿", 80),
-  P("William Saliba", "Arsenal", "CB", 25, "🇫🇷", 80),
-  P("Victor Osimhen", "Galatasaray", "ST", 27, "🇳🇬", 75),
-  P("Rafael Leão", "AC Milan", "LW", 26, "🇵🇹", 75),
-  P("Rúben Dias", "Man City", "CB", 28, "🇵🇹", 75),
-  P("Joško Gvardiol", "Man City", "CB", 24, "🇭🇷", 75),
-  P("Michael Olise", "Bayern", "RW", 24, "🇫🇷", 75),
-  P("Nico Williams", "Athletic Club", "LW", 23, "🇪🇸", 70),
-  P("João Neves", "PSG", "CM", 21, "🇵🇹", 70),
-  P("Vitinha", "PSG", "CM", 26, "🇵🇹", 70),
-  P("Xavi Simons", "Tottenham", "AM", 22, "🇳🇱", 70),
-  P("Nicolò Barella", "Inter", "CM", 29, "🇮🇹", 70),
-  P("Aurélien Tchouaméni", "Real Madrid", "DM", 26, "🇫🇷", 70),
-  P("Enzo Fernández", "Chelsea", "CM", 25, "🇦🇷", 70),
-  P("Trent Alexander-Arnold", "Real Madrid", "RB", 27, "🏴󠁧󠁢󠁥󠁮󠁧󠁿", 65),
-  P("Achraf Hakimi", "PSG", "RB", 27, "🇲🇦", 65),
-  P("Dominik Szoboszlai", "Liverpool", "CM", 25, "🇭🇺", 65),
-  P("Bradley Barcola", "PSG", "LW", 23, "🇫🇷", 65),
-  P("Benjamin Šeško", "Man United", "ST", 22, "🇸🇮", 65),
-  P("Luis Díaz", "Bayern", "LW", 29, "🇨🇴", 65),
-  P("Ryan Gravenberch", "Liverpool", "DM", 23, "🇳🇱", 60),
-  P("Jules Koundé", "Barcelona", "RB", 27, "🇫🇷", 60),
-  P("Ronald Araújo", "Barcelona", "CB", 26, "🇺🇾", 60),
-  P("Warren Zaïre-Emery", "PSG", "CM", 20, "🇫🇷", 60),
-  P("Dani Olmo", "Barcelona", "AM", 27, "🇪🇸", 60),
-  P("Ollie Watkins", "Aston Villa", "ST", 30, "🏴󠁧󠁢󠁥󠁮󠁧󠁿", 55),
-  P("Eberechi Eze", "Arsenal", "AM", 27, "🏴󠁧󠁢󠁥󠁮󠁧󠁿", 55),
-  P("Kobbie Mainoo", "Man United", "CM", 20, "🏴󠁧󠁢󠁥󠁮󠁧󠁿", 55),
-  P("Mohamed Salah", "Liverpool", "RW", 33, "🇪🇬", 50),
-  P("Frenkie de Jong", "Barcelona", "CM", 28, "🇳🇱", 50),
-  P("Alphonso Davies", "Bayern", "LB", 25, "🇨🇦", 50),
-  P("Cody Gakpo", "Liverpool", "LW", 26, "🇳🇱", 50),
-  P("Ousmane Dembélé", "PSG", "RW", 28, "🇫🇷", 50),
-  P("Darwin Núñez", "Al-Hilal", "ST", 26, "🇺🇾", 45),
-  P("Gianluigi Donnarumma", "Man City", "GK", 27, "🇮🇹", 45),
-  P("Endrick", "Real Madrid", "ST", 19, "🇧🇷", 45),
-  P("Arda Güler", "Real Madrid", "AM", 21, "🇹🇷", 45),
-  P("Kaoru Mitoma", "Brighton", "LW", 28, "🇯🇵", 45),
-  P("Morgan Gibbs-White", "Nottm Forest", "AM", 25, "🏴󠁧󠁢󠁥󠁮󠁧󠁿", 45),
-  P("Marcus Rashford", "Barcelona", "LW", 28, "🏴󠁧󠁢󠁥󠁮󠁧󠁿", 40),
-  P("Rasmus Højlund", "Napoli", "ST", 23, "🇩🇰", 40),
-  P("Ademola Lookman", "Atalanta", "LW", 28, "🇳🇬", 40),
-  P("Kim Min-jae", "Bayern", "CB", 29, "🇰🇷", 38),
-  P("Son Heung-min", "Inter Miami", "LW", 33, "🇰🇷", 12),
-  P("Scott McTominay", "Napoli", "CM", 29, "🏴󠁧󠁢󠁳󠁣󠁴󠁿", 35),
-  P("Amad Diallo", "Man United", "RW", 23, "🇨🇮", 35),
-  P("Alisson", "Liverpool", "GK", 33, "🇧🇷", 28),
-  P("Virgil van Dijk", "Liverpool", "CB", 34, "🇳🇱", 28),
-  P("Ederson", "Galatasaray", "GK", 32, "🇧🇷", 22),
-  P("Thibaut Courtois", "Real Madrid", "GK", 33, "🇧🇪", 25),
-  P("Antoine Griezmann", "Atlético", "AM", 34, "🇫🇷", 25),
-  P("Antonio Rüdiger", "Real Madrid", "CB", 32, "🇩🇪", 20),
-  P("Kevin De Bruyne", "Napoli", "AM", 34, "🇧🇪", 20),
-  P("Lionel Messi", "Inter Miami", "RW", 38, "🇦🇷", 18),
-  P("Robert Lewandowski", "Barcelona", "ST", 37, "🇵🇱", 15),
-  P("Neymar", "Al-Hilal", "LW", 34, "🇧🇷", 12),
-  P("Federico Chiesa", "Liverpool", "RW", 28, "🇮🇹", 12),
-  P("Cristiano Ronaldo", "Al-Nassr", "ST", 41, "🇵🇹", 10),
-  P("Luka Modrić", "AC Milan", "CM", 40, "🇭🇷", 4),
-];
+import { KIT, SQUAD } from "./data/squad.js";
 
 /* ------------------------------------------------------------------ */
 
@@ -158,8 +25,8 @@ function shuffle(list) {
 }
 
 /* Avoid identical neighbours so no round is a coin-flip on a tie. */
-function buildDeck() {
-  const a = shuffle(SQUAD);
+function buildDeck(roster) {
+  const a = shuffle(roster);
   for (let i = 1; i < a.length; i++) {
     if (a[i].value === a[i - 1].value) {
       for (let j = i + 2; j < a.length; j++) {
@@ -204,6 +71,9 @@ const WIKI_TITLE = {
 
 const photoCache = new Map();
 
+/* Wikipedia is now the second choice: when /api/squad has answered, players
+ * arrive carrying an API-Football portrait already, and this only runs for
+ * the ones it had nothing for. */
 async function lookupPhoto(name) {
   if (photoCache.has(name)) return photoCache.get(name);
   const title = (WIKI_TITLE[name] || name).replace(/ /g, "_");
@@ -642,7 +512,8 @@ function Panel({ player, reveal, shown, dim, photo }) {
 
 export default function App() {
   const [screen, setScreen] = useState("intro"); // intro | play | over
-  const [deck, setDeck] = useState(buildDeck);
+  const [roster, setRoster] = useState(SQUAD);
+  const [deck, setDeck] = useState(() => buildDeck(SQUAD));
   const [idx, setIdx] = useState(0);
   const [phase, setPhase] = useState("guess"); // guess | reveal | verdict | shift
   const [pick, setPick] = useState(null);
@@ -691,6 +562,43 @@ export default function App() {
     return () => window.removeEventListener("resize", check);
   }, []);
 
+  /* Refresh the roster from API-Football once, on mount. The valuations are
+   * ours either way; what comes back is the current club, the current age
+   * and a licensed portrait. Anything short of a full answer leaves the
+   * built-in array in place, so this can fail silently and the game is
+   * exactly as playable as it was before. */
+  useEffect(() => {
+    let live = true;
+    fetch("/api/squad")
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!live || !data || !Array.isArray(data.players) || !data.players.length) return;
+        setRoster(data.players);
+
+        /* Publish the portraits straight into state. They came back with
+         * the roster, so there is nothing to look up and nothing to wait
+         * for — the first card can already be wearing one. */
+        const shipped = {};
+        for (const p of data.players) {
+          if (!p.photo) continue;
+          shipped[p.name] = p.photo;
+          photoCache.set(p.name, p.photo);
+          asked.current.add(p.name);
+        }
+        if (Object.keys(shipped).length) setPhotos((m) => ({ ...shipped, ...m }));
+      })
+      .catch(() => {});
+    return () => {
+      live = false;
+    };
+  }, []);
+
+  /* Deal off the live roster as soon as it lands — but only between games,
+   * so a deck is never swapped out from under a round in progress. */
+  useEffect(() => {
+    if (screen === "intro") setDeck(buildDeck(roster));
+  }, [roster, screen]);
+
   const trio = [deck[idx], deck[idx + 1], deck[idx + 2] || deck[0]];
   const known = trio[0];
   const mystery = trio[1];
@@ -701,6 +609,12 @@ export default function App() {
     deck.slice(idx, idx + 4).forEach((p) => {
       if (!p || asked.current.has(p.name)) return;
       asked.current.add(p.name);
+      /* API-Football already gave us a portrait for most of them; only the
+       * stragglers cost a Wikipedia round trip. */
+      if (p.photo) {
+        setPhotos((m) => ({ ...m, [p.name]: p.photo }));
+        return;
+      }
       lookupPhoto(p.name).then((src) => {
         if (live && src) setPhotos((m) => ({ ...m, [p.name]: src }));
       });
@@ -713,7 +627,7 @@ export default function App() {
   const start = () => {
     timers.current.forEach(clearTimeout);
     timers.current = [];
-    setDeck(buildDeck());
+    setDeck(buildDeck(roster));
     setIdx(0);
     setScore(0);
     setPick(null);
@@ -772,7 +686,7 @@ export default function App() {
               setShifted(false);
               setIdx((i) => {
                 const next = i + 1;
-                if (next + 3 >= deck.length) setDeck((d) => [...d, ...buildDeck()]);
+                if (next + 3 >= deck.length) setDeck((d) => [...d, ...buildDeck(roster)]);
                 return next;
               });
               setPick(null);
@@ -1126,7 +1040,7 @@ export default function App() {
               className="mt-7 uppercase"
               style={{ fontSize: 9, letterSpacing: "0.24em", color: "rgba(255,255,255,0.32)" }}
             >
-              Photos via Wikipedia · values are rounded estimates
+              Squads &amp; photos via API-Football · values are rounded estimates
             </p>
           </div>
         </div>
