@@ -207,26 +207,65 @@ function buildIndex(players) {
   const full = new Map();
   const initial = new Map();
   const initialCount = new Map();
+  const tokens = new Map();
+  const mononym = new Map();
 
   for (const p of players) {
-    full.set(normalize(p.name), p);
+    const n = normalize(p.name);
+    full.set(n, p);
+
     const ik = initialKey(p.name);
     if (ik) {
       initialCount.set(ik, (initialCount.get(ik) || 0) + 1);
       initial.set(ik, p);
     }
+
+    const tk = tokenKey(p.name);
+    if (tk) tokens.set(tk, p);
+
+    // one-word names only; these are the ones the API tends to extend
+    if (!n.includes(" ")) mononym.set(n, p);
   }
   for (const [key, n] of initialCount) if (n > 1) initial.delete(key);
 
-  return { full, initial };
+  return { full, initial, tokens, mononym };
 }
 
 const INDEX = buildIndex(CURATED);
 
+/* Names API-Football writes in a shape nothing else will find. Add an
+ * entry here rather than loosening the rules for everybody — the refresh
+ * prints the squad members it could not place, which is where these come
+ * from. Keyed by what the API says. */
+export const NAME_ALIASES = {
+  // e.g. "Mohamed Salah Hamed Mahrous Ghaly": "Mohamed Salah",
+};
+
+/* Every name token, sorted. Catches the same name written in a different
+ * order — their "Heung-Min Son" against our "Son Heung-min" — while still
+ * requiring every token to be present, so it cannot drift onto someone
+ * else the way a surname can. */
+function tokenKey(name) {
+  const parts = normalize(name).split(" ").filter(Boolean);
+  return parts.length ? [...parts].sort().join(" ") : null;
+}
+
 /* Returns the curated entry an API-Football name refers to, or null.
  * matchDetail also says how confident the match was, which the refresh
- * uses to break ties when two squads claim the same player. */
-export function matchDetail(name) {
+ * uses to break ties when two squads claim the same player.
+ *
+ * `club` is the squad currently being scanned. The two strict tiers run
+ * without it, so a player who moved is still recognised in his new squad.
+ * The looser tiers below only run when the club already agrees — that is
+ * what keeps them from wandering: Atalanta once fielded an Ederson, and
+ * without the club check he would answer to Manchester City's. */
+export function matchDetail(name, club) {
+  const alias = NAME_ALIASES[name];
+  if (alias) {
+    const a = INDEX.full.get(normalize(alias));
+    if (a) return { player: a, precision: "alias" };
+  }
+
   const f = INDEX.full.get(normalize(name));
   if (f) return { player: f, precision: "full" };
 
@@ -235,11 +274,28 @@ export function matchDetail(name) {
     const i = INDEX.initial.get(ik);
     if (i) return { player: i, precision: "initial" };
   }
+
+  if (!club) return null;
+
+  const tk = tokenKey(name);
+  if (tk) {
+    const t = INDEX.tokens.get(tk);
+    if (t && t.club === club) return { player: t, precision: "reordered" };
+  }
+
+  /* A mononym with a surname bolted on: their "Alisson Becker" is our
+   * "Alisson". Only the first token counts, and only within his own club. */
+  const first = normalize(name).split(" ").filter(Boolean)[0];
+  if (first) {
+    const m = INDEX.mononym.get(first);
+    if (m && m.club === club) return { player: m, precision: "mononym" };
+  }
+
   return null;
 }
 
-export function matchPlayer(name) {
-  return matchDetail(name)?.player ?? null;
+export function matchPlayer(name, club) {
+  return matchDetail(name, club)?.player ?? null;
 }
 
 /* ------------------------------------------------------------------ *
@@ -259,6 +315,9 @@ export const CLUB_QUERY = {
   "RB Leipzig": "RB Leipzig",
   "Sporting CP": "Sporting CP",
   "Real Sociedad": "Real Sociedad",
+  /* The hyphen defeats their search; the spaced form finds them. */
+  "Al-Hilal": "Al Hilal",
+  "Al-Nassr": "Al Nassr",
 };
 
 /* The clubs we actually need squads for — derived, so adding a player

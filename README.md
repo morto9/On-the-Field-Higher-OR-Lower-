@@ -131,6 +131,15 @@ Each club's line shows how many curated players it matched out of the squad
 size, and flags the count when it differs from what we curate for that club —
 which is how you spot a club resolving to the wrong team.
 
+To fix one club without re-fetching all of them:
+
+```bash
+npm run refresh-squad -- --clubs "Bayern,Al-Hilal" --write
+```
+
+That refetches only those and merges into the committed roster, so correcting
+three clubs costs six calls rather than a full run's twenty-three.
+
 Names are the fragile part, because the two sources spell them differently.
 `matchPlayer` tries two widths: the full name, then initial plus surname (so
 API-Football's `"L. Yamal"` finds `"Lamine Yamal"`). Accents are stripped on both
@@ -153,6 +162,15 @@ matters here:
 
 Club changes are reported separately, so a real transfer is visible in the run
 and a bad match doesn't hide among them.
+
+Two loosenings are allowed, but **only inside the club we already have the
+player at**: the same name written in a different order (their "Heung-Min Son"
+against our "Son Heung-min") and a mononym with a surname bolted on (their
+"Alisson Becker" against our "Alisson"). Confining them to the club is what
+keeps them safe — Galatasaray's Ederson and Atalanta's are different men with
+identical names, and only the club tells them apart. Anything still unplaced
+gets an entry in `NAME_ALIASES`; the run prints the squad names it couldn't
+match, narrowed to ones sharing a word, so filling that in is a one-liner.
 
 Team lookup is scored rather than exact-matched — API-Football calls Bayern
 "Bayern München", which no exact test on "Bayern Munich" will ever find — and

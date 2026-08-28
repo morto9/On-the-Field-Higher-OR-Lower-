@@ -21,6 +21,8 @@ import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
 import { CURATED, CLUBS, CLUB_QUERY, matchPlayer, mergeRoster } from "../src/data/squad.js";
+import { TEAM_IDS } from "../src/data/teams.js";
+import { ROSTER as COMMITTED } from "../src/data/roster.js";
 import { renderRoster, main as refreshSquad } from "./refresh-squad.mjs";
 import { slug, extensionFor } from "./fetch-photos.mjs";
 
@@ -50,6 +52,14 @@ check("an ambiguous initial+surname is refused", matchPlayer("R. Martinez"), nul
 check("a stranger is not matched", matchPlayer("Nobody Here"), null);
 check("mononyms match whole", matchPlayer("Alisson")?.name, "Alisson");
 check("a mononym is never abbreviated away", matchPlayer("A. "), null);
+
+/* Looser tiers, allowed only inside the club we already have him at. */
+check("reordered name, own club", matchPlayer("Heung-Min Son", "Inter Miami")?.name, "Son Heung-min");
+check("reordered name, wrong club", matchPlayer("Heung-Min Son", "Chelsea"), null);
+check("mononym extended, own club", matchPlayer("Alisson Becker", "Liverpool")?.name, "Alisson");
+check("mononym extended, wrong club", matchPlayer("Alisson Becker", "Atalanta"), null);
+check("loose tiers need a club", matchPlayer("Alisson Becker"), null);
+check("the collision stays refused with a club", matchPlayer("Iñigo Martínez", "Barcelona"), null);
 
 console.log("\nmergeRoster");
 const base = [
@@ -144,6 +154,10 @@ console.log("\nrefresh-squad (stubbed, dry run)");
 
 const idFor = new Map(CLUBS.map((c, i) => [CLUB_QUERY[c] || c, 1000 + i]));
 const clubForId = new Map([...idFor].map(([n, id]) => [id, n]));
+/* Clubs already in teams.js are never searched — resolveTeam returns the
+ * committed id straight away — so the squad stub has to answer to those
+ * ids too, or the run silently comes back empty for every cached club. */
+for (const [club, id] of Object.entries(TEAM_IDS)) clubForId.set(id, CLUB_QUERY[club] || club);
 const strip = (s) => s.normalize("NFD").replace(/[̀-ͯ]/g, "");
 
 let apiCalls = 0;
@@ -227,10 +241,36 @@ check("resolves every curated player", out.includes(`${CURATED.length}/${CURATED
 check("finds a portrait for all of them", out.includes(`${CURATED.length}/${CURATED.length} with a portrait`), true);
 check("reports its API spend", /\d+ API call\(s\) used/.test(out), true);
 check("stops at a dry run", out.includes("Dry run"), true);
-check("two calls per club, plus the retried one", apiCalls, CLUBS.length * 2 + 1);
+/* One squad call per club, a search only for clubs teams.js doesn't
+ * already know, and the one 429 that was retried. */
+const uncached = CLUBS.filter((c) => !TEAM_IDS[c]).length;
+check("cached team ids save a call each", apiCalls, CLUBS.length + uncached + 1);
 check("a 429 is retried, not dropped", out.includes("rate limited"), true);
 check("picks the club over its reserve side", out.includes(" II") === false, true);
 check("writes nothing on a dry run", (await import("node:fs")).existsSync(join(HERE, "..", "src", "data", "teams.js")) , true);
+
+/* A --clubs run must refetch only what it names and keep the rest of the
+ * committed roster. Dropping 20 clubs to fix 3 would be the expensive
+ * mistake here. */
+console.log("\nrefresh-squad --clubs (stubbed, dry run)");
+const partialLog = [];
+console.log = (...a) => partialLog.push(a.join(" "));
+process.stdout.write = (chunk) => (partialLog.push(String(chunk).replace(/\n$/, "")), true);
+const before = apiCalls;
+process.argv = [process.argv[0], join(HERE, "refresh-squad.mjs"), "--rpm", "60000", "--clubs", "Barcelona,Arsenal"];
+try {
+  await refreshSquad();
+} finally {
+  console.log = realLog;
+  process.stdout.write = realWrite;
+}
+const partialOut = partialLog.join("\n");
+const resolved = Number((partialOut.match(/(\d+)\/\d+ curated players resolved/) || [])[1]);
+check("only the named clubs are fetched", apiCalls - before <= 4, true);
+check("coverage is reported against the whole roster", partialOut.includes(`/${CURATED.length} curated`), true);
+/* The point of --clubs: everything already committed survives, and the
+ * refetched clubs can only add to it. */
+check("nothing already committed is dropped", resolved >= Object.keys(COMMITTED).length, true);
 
 console.log(failed ? `\n${failed} check(s) failed` : "\nall checks passed");
 process.exit(failed ? 1 : 0);

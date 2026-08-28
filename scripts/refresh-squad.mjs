@@ -23,7 +23,9 @@
  * Flags (usable directly, or after `--` if your shell passes it through):
  *   --write          apply, rather than printing what would change
  *   --teams          only resolve team ids, and write src/data/teams.js
- *   --limit N        first N clubs, for a smoke test
+ *   --limit N        first N clubs, for a smoke test (cannot be written)
+ *   --clubs "A,B"    refetch only these clubs, merging into the committed
+ *                    roster — the cheap way to fix a club that went wrong
  *   --no-wikipedia   API-Football portraits only
  *   --rpm N          requests per minute (default 10, the free tier limit)
  *
@@ -69,6 +71,12 @@ const WRITE = () => flag("--write");
 const NO_WIKI = () => flag("--no-wikipedia");
 const TEAMS_ONLY = () => flag("--teams");
 const LIMIT = () => Number(argOf("--limit")) || 0;
+/* --clubs "Bayern,Al-Hilal" — refetch just these and merge into what is
+ * already committed, instead of spending a call on all 23 to fix three. */
+const ONLY_CLUBS = () => {
+  const raw = argOf("--clubs");
+  return raw ? raw.split(",").map((c) => c.trim()).filter(Boolean) : null;
+};
 const RPM = () => Number(argOf("--rpm")) || 10;
 
 /* The free plan allows 10 requests a minute and answers 429 the moment
@@ -155,7 +163,12 @@ async function resolveTeam(club) {
     let score = shared / Math.max(1, wanted.size);
     if (n === want) score += 2;
     else if (n.startsWith(want) || n.includes(want)) score += 1;
-    if (/\b(ii|b|u1[6-9]|u2[0-3]|reserve|women|fem)\b/.test(n)) score -= 3;
+    /* Women's and youth sides carry the parent club's name and would
+     * otherwise win on a tie. API-Football suffixes the women's team with
+     * a bare "W" — "Bayern Munich W" — which is easy to miss and did in
+     * fact win Bayern on the first live run. */
+    if (/(^|\s)(w|ii|b|u1[6-9]|u2[0-3]|reserve|reserves|women|fem|femenino|feminin|feminine|academy|youth)(\s|$)/.test(n))
+      score -= 4;
     if (h.team?.national) score -= 2;
 
     return { id: h.team?.id, name, score, exact: n === want };
@@ -175,9 +188,13 @@ async function fetchClub(club) {
   if (!Array.isArray(roster)) return { club, found: [], team, why: "no squad returned" };
 
   const found = [];
+  const unplaced = [];
   for (const person of roster) {
-    const detail = matchDetail(person.name);
-    if (!detail) continue; // not one of ours
+    const detail = matchDetail(person.name, club);
+    if (!detail) {
+      unplaced.push(person.name);
+      continue; // not one of ours
+    }
     const curated = detail.player;
     const photo = person.photo || null;
     const prev = PREVIOUS[curated.name];
@@ -199,7 +216,7 @@ async function fetchClub(club) {
       _apiName: person.name,
     });
   }
-  return { club, found, team, squadSize: roster.length };
+  return { club, found, team, squadSize: roster.length, unplaced };
 }
 
 /* ------------------------------------------------------------------ *
@@ -323,7 +340,15 @@ export async function main() {
     process.exit(1);
   }
 
-  const clubs = LIMIT() ? CLUBS.slice(0, LIMIT()) : CLUBS;
+  const picked = ONLY_CLUBS();
+  if (picked) {
+    const unknown = picked.filter((c) => !CLUBS.includes(c));
+    if (unknown.length) {
+      console.error(`Not clubs in SQUAD: ${unknown.join(", ")}\nKnown: ${CLUBS.join(", ")}`);
+      process.exit(1);
+    }
+  }
+  const clubs = picked ? picked : LIMIT() ? CLUBS.slice(0, LIMIT()) : CLUBS;
 
   if (TEAMS_ONLY()) {
     console.log(`Resolving ${clubs.length} club(s) to team ids, ~${gapMs() / 1000}s apart\n`);
@@ -371,10 +396,13 @@ export async function main() {
       `\n`
   );
 
-  const entries = {};
+  /* A partial run starts from what is committed, so the clubs it does not
+   * visit keep their entries instead of being dropped. */
+  const entries = picked ? { ...PREVIOUS } : {};
   const clubProblems = [];
   const conflicts = [];
   const transfers = [];
+  const unplacedByClub = {};
   const resolvedTeams = { ...TEAM_IDS };
   const resolvedNames = { ...TEAM_NAMES };
 
@@ -382,7 +410,8 @@ export async function main() {
   // plans rate-limit per minute.
   for (const club of clubs) {
     try {
-      const { found, why, team, squadSize } = await fetchClub(club);
+      const { found, why, team, squadSize, unplaced } = await fetchClub(club);
+      if (unplaced) unplacedByClub[club] = unplaced;
       if (why) clubProblems.push(`${club}: ${why}`);
       if (team) {
         resolvedTeams[club] = team.id;
@@ -392,10 +421,16 @@ export async function main() {
       for (const p of found) {
         const seen = entries[p.name];
         if (seen && seen.club !== p.club) {
-          /* Two squads both claim him. Prefer the exact name match; if
-           * they are equally confident, keep the first and say so rather
-           * than picking silently. */
-          const better = p._precision === "full" && seen._precision !== "full";
+          /* Two squads both claim him. Being at the club we already have
+           * him at outranks everything — Galatasaray's Ederson and
+           * Atalanta's are different men with identical names, and only
+           * the club tells them apart. Confidence of the name match
+           * breaks the remaining ties; an even tie keeps the first and
+           * says so rather than picking silently. */
+          const rank = (e) =>
+            (e._curatedClub === e.club ? 2 : 0) +
+            (e._precision === "full" || e._precision === "alias" ? 1 : 0);
+          const better = rank(p) > rank(seen);
           conflicts.push(
             `${p.name}: ${seen.club} ("${seen._apiName}", ${seen._precision}) vs ` +
               `${p.club} ("${p._apiName}", ${p._precision}) — kept ${better ? p.club : seen.club}`
@@ -446,6 +481,7 @@ export async function main() {
   }
 
   const matched = Object.keys(entries).length;
+  const scope = picked ? CURATED.filter((c) => picked.includes(c.club)).length : CURATED.length;
   const withPhoto = Object.values(entries).filter((e) => e.photo).length;
   const missing = CURATED.filter((p) => !entries[p.name]).map((p) => p.name);
 
@@ -454,8 +490,27 @@ export async function main() {
   console.log(`  ${calls} API call(s) used`);
 
   if (missing.length) {
-    console.log(`\n  ! ${missing.length} not found: ${missing.slice(0, 12).join(", ")}` +
-      (missing.length > 12 ? ` … and ${missing.length - 12} more` : ""));
+    console.log(`\n  ! ${missing.length} curated player(s) not found:`);
+    for (const p of CURATED.filter((c) => !entries[c.name])) {
+      /* Show what his club's squad was actually called, narrowed to names
+       * sharing a word with his, so a name written in a shape we don't
+       * recognise is one glance away from an entry in NAME_ALIASES. */
+      const pool = unplacedByClub[p.club] || [];
+      const mine = new Set(normalize(p.name).split(" ").filter(Boolean));
+      const near = pool.filter((n) =>
+        normalize(n).split(" ").some((w) => w.length > 2 && mine.has(w))
+      );
+      const hint = near.length
+        ? `  their squad has: ${near.slice(0, 3).map((n) => JSON.stringify(n)).join(", ")}`
+        : pool.length
+          ? ""
+          : `  (${p.club} returned no unmatched names — he may have left)`;
+      console.log(`      ${p.name.padEnd(24)} ${p.club.padEnd(14)}${hint}`);
+    }
+    console.log(
+      `    A name in a shape we don't recognise goes in NAME_ALIASES in\n` +
+        `    src/data/squad.js, keyed by what the API calls him.`
+    );
   }
   if (clubProblems.length) {
     console.log(`\n  ! club problems:`);
@@ -480,7 +535,7 @@ export async function main() {
   /* A thin result usually means a renamed club or a quota wall part-way
    * through, not that everyone left football. Overwriting a good roster
    * with it would be the expensive mistake, so refuse unless forced. */
-  if (matched < CURATED.length / 2 && Object.keys(PREVIOUS).length && !flag("--force")) {
+  if (!picked && matched < CURATED.length / 2 && Object.keys(PREVIOUS).length && !flag("--force")) {
     console.error(
       `\nRefusing to write: only ${matched} of ${CURATED.length} resolved, ` +
         `and roster.js currently has ${Object.keys(PREVIOUS).length}.\n` +
@@ -494,7 +549,10 @@ export async function main() {
     return;
   }
   if (LIMIT()) {
-    console.error(`\nRefusing to write a --limit run: it would drop the clubs it skipped.`);
+    console.error(
+      `\nRefusing to write a --limit run: it would drop the clubs it skipped.\n` +
+        `To refresh specific clubs without losing the rest, use --clubs "A,B".`
+    );
     process.exit(1);
   }
 
