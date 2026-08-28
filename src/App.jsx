@@ -326,7 +326,13 @@ function Panel({ player, reveal, shown, dim, photo }) {
       className="relative overflow-hidden"
       style={{ flex: "0 0 33.3333%", background: `linear-gradient(150deg, ${c1} 0%, ${c2} 78%)` }}
     >
-      {/* player photo, blended into the club colours like a broadcast wall */}
+      {/* The portrait carries the round, so it is the one layer that gets
+          to be legible. It used to blend in luminosity, which takes its
+          luminance and the backdrop's hue — a technically pretty effect
+          that painted every player the colour of his kit gradient and lost
+          the face with it. Now it is composited normally and the club
+          colour arrives as its own tint above, where it can be dialled
+          back without touching detail. */}
       {photo && (
         <img
           src={photo}
@@ -341,11 +347,29 @@ function Panel({ player, reveal, shown, dim, photo }) {
             height: "112%",
             objectFit: "cover",
             objectPosition: "50% 18%",
-            mixBlendMode: "luminosity",
-            opacity: loaded ? 0.62 : 0,
-            filter: "contrast(1.1) saturate(0.7)",
+            opacity: loaded ? 0.95 : 0,
+            filter: "contrast(1.04) saturate(0.95)",
             transition: "opacity 600ms ease",
             animation: loaded ? "kenburns 18s ease-in-out infinite alternate" : "none",
+          }}
+        />
+      )}
+
+      {/* Club colour, washed over the photo rather than through it, and
+          masked away from the middle. These portraits are cut-outs on a
+          plain studio grey, so the mask puts the colour exactly where it
+          reads as lighting — the empty backdrop and the edges — and keeps
+          it off the face, which is the part worth seeing. */}
+      {photo && (
+        <div
+          className="absolute inset-0 pointer-events-none"
+          style={{
+            background: `linear-gradient(150deg, ${c1} 0%, ${c2} 78%)`,
+            opacity: 0.62,
+            maskImage:
+              "radial-gradient(56% 40% at 50% 34%, rgba(0,0,0,0.10) 0%, rgba(0,0,0,0.45) 58%, #000 88%)",
+            WebkitMaskImage:
+              "radial-gradient(56% 40% at 50% 34%, rgba(0,0,0,0.10) 0%, rgba(0,0,0,0.45) 58%, #000 88%)",
           }}
         />
       )}
@@ -355,23 +379,28 @@ function Panel({ player, reveal, shown, dim, photo }) {
         className="absolute inset-0 pointer-events-none"
         style={{
           background:
-            "radial-gradient(120% 80% at 20% 0%, rgba(255,255,255,0.22), transparent 60%)",
+            "radial-gradient(120% 80% at 20% 0%, rgba(255,255,255,0.13), transparent 60%)",
         }}
       />
       {/* LED wall dot texture */}
       <div
         className="absolute inset-0 pointer-events-none"
         style={{
-          opacity: 0.16,
+          opacity: 0.09,
           backgroundImage: "radial-gradient(rgba(255,255,255,0.6) 1px, transparent 1px)",
           backgroundSize: "5px 5px",
         }}
       />
 
-      {/* stadium shadow */}
+      {/* Stadium shadow, now weighted rather than even: light across the
+          top third where the face is, heavy from the middle down where the
+          name, club and value have to stay readable. */}
       <div
         className="absolute inset-0 pointer-events-none"
-        style={{ background: "linear-gradient(180deg, rgba(0,0,0,0.25), rgba(0,0,0,0.72))" }}
+        style={{
+          background:
+            "linear-gradient(180deg, rgba(0,0,0,0.30) 0%, rgba(0,0,0,0.22) 26%, rgba(0,0,0,0.58) 58%, rgba(0,0,0,0.88) 100%)",
+        }}
       />
       {/* oversized shirt-back initials — the fallback when no photo loads */}
       {!photo && (
@@ -396,7 +425,12 @@ function Panel({ player, reveal, shown, dim, photo }) {
         className={`relative h-full w-full flex flex-col items-center justify-center px-5 text-center ${
           dim ? "opacity-70" : ""
         }`}
-        style={{ transition: "opacity 300ms" }}
+        /* The photo is far more present than it was, so the type carries
+           its own shadow rather than relying on the scrim alone. */
+        style={{
+          transition: "opacity 300ms",
+          textShadow: "0 2px 16px rgba(0,0,0,0.85), 0 1px 3px rgba(0,0,0,0.8)",
+        }}
       >
         <div
           className="flex items-center gap-2 mb-3"
