@@ -12,9 +12,53 @@
  *
  *  Empty is fine: any club missing from this map is looked up on demand.
  * ------------------------------------------------------------------ */
-export const TEAM_IDS = {};
+export const TEAM_IDS = {
+  "AC Milan": 489,
+  "Arsenal": 42,
+  "Aston Villa": 66,
+  "Atalanta": 499,
+  "Athletic Club": 531,
+  "Atlético": 530,
+  "Barcelona": 529,
+  "Bayern": 1860,
+  "Brighton": 51,
+  "Chelsea": 49,
+  "Galatasaray": 645,
+  "Inter": 505,
+  "Inter Miami": 9568,
+  "Liverpool": 40,
+  "Man City": 50,
+  "Man United": 33,
+  "Napoli": 492,
+  "Nottm Forest": 65,
+  "PSG": 85,
+  "Real Madrid": 541,
+  "Tottenham": 47,
+};
 
 /* What each id resolved to, for eyeballing. Not used at runtime — it is
  * here so a wrong mapping is obvious in review rather than showing up as
  * a club that mysteriously returns no players. */
-export const TEAM_NAMES = {};
+export const TEAM_NAMES = {
+  "AC Milan": "AC Milan",
+  "Arsenal": "Arsenal",
+  "Aston Villa": "Aston Villa",
+  "Atalanta": "Atalanta",
+  "Athletic Club": "Athletic Club",
+  "Atlético": "Atletico Madrid",
+  "Barcelona": "Barcelona",
+  "Bayern": "Bayern Munich W",
+  "Brighton": "Brighton",
+  "Chelsea": "Chelsea",
+  "Galatasaray": "Galatasaray",
+  "Inter": "Inter",
+  "Inter Miami": "Inter Miami",
+  "Liverpool": "Liverpool",
+  "Man City": "Manchester City",
+  "Man United": "Manchester United",
+  "Napoli": "Napoli",
+  "Nottm Forest": "Nottingham Forest",
+  "PSG": "Paris Saint Germain",
+  "Real Madrid": "Real Madrid",
+  "Tottenham": "Tottenham",
+};
