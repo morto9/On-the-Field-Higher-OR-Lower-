@@ -14,7 +14,7 @@ that surges between rounds, and a goal sound when you call it right.
 npm install
 npm run dev      # http://localhost:5173
 npm run build    # -> dist/
-npm run check    # offline tests for the API-Football join
+npm run check    # offline tests for the data layer
 ```
 
 `npm run dev` serves the game but not the `/api` functions, so the roster is the
@@ -32,7 +32,7 @@ src/data/squad.js   valuations, kits, flags, name matching
 src/App.jsx         the game — audio engine and UI
 src/main.jsx        mount
 src/styles.css      the ~50 utility classes the app uses, hand-written
-scripts/            offline checks
+scripts/            refresh command and offline checks
 ```
 
 There's no CSS framework and no state library. `styles.css` covers exactly the
@@ -88,6 +88,40 @@ instance, which halves every refresh after the first.
 `npm run check` exercises all of this against a stubbed API, so the join and the
 fallbacks are testable without a key or a network.
 
+### Refreshing the valuations
+
+Market values come from Transfermarkt, who publish no API — so they are pulled
+by a **maintenance command you run**, not by anything at runtime:
+
+```bash
+npm run refresh-values                    # dry run, prints the diff
+npm run refresh-values -- --write         # applies it to src/data/squad.js
+npm run refresh-values -- --only "Rodri"  # one player
+npm run refresh-values -- --debug "Pedri" # dump the HTML it is being served
+```
+
+You run it after a transfer window, read the diff, and commit the result.
+Nothing in the deployed app talks to Transfermarkt, and players of the game
+never generate a request to their site.
+
+That split is the point. Values move in batches a few times a season, so a live
+lookup would buy nothing over a periodic refresh while adding latency, rate
+limits and an outage surface — and re-serving their feed to the public is a
+different proposition from refreshing a committed constant. Transfermarkt is an
+Axel Springer company, so their database also carries the EU *sui generis*
+database right, which is separate from copyright and aimed squarely at
+substantial extraction. Read their terms before pointing this anywhere public,
+and credit them on screen.
+
+The command never writes without `--write`, and it refuses to take a value off a
+row whose name doesn't match exactly — a wrong number would be invisible in the
+game, so a near-miss is reported instead of guessed at.
+
+Everything that knows what their HTML looks like is in the `SELECTORS` block at
+the top of `scripts/refresh-values.mjs`. When their markup moves — and it will —
+that block is the only thing to change; `--debug` dumps what you're actually
+being served so you can fix it against the real page.
+
 ### Photos
 
 Wikipedia is now the **fallback**, behind API-Football's portraits — it only runs
@@ -132,7 +166,7 @@ browsers require.
   feel designed.
 - Best streak lives in React state, so it resets on refresh.
 - No share card at full time.
-- Valuations are still hand-maintained, so they drift between transfer windows.
-  Refreshing them means editing `SQUAD` — the API can't do it.
+- Valuations drift between runs of `npm run refresh-values`; nothing refreshes
+  them automatically, by design.
 - Nationality is curated too: `/players/squads` doesn't return it, so a player
   added straight from the API would have no flag.
