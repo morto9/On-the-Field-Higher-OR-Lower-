@@ -22,6 +22,7 @@ import { dirname, join } from "node:path";
 
 import { CURATED, CLUBS, CLUB_QUERY, matchPlayer, mergeRoster } from "../src/data/squad.js";
 import { renderRoster } from "./refresh-squad.mjs";
+import { slug, extensionFor } from "./fetch-photos.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -78,16 +79,35 @@ const partial = mergeRoster(base, { A: { club: null, age: null, photo: null } })
 check("null club falls back to curated", partial[0].club, "Old");
 check("null age falls back to curated", partial[0].age, 20);
 
+/* A local copy under public/ must win over the CDN URL it came from. */
+const withLocal = mergeRoster(base, {
+  A: { club: "New", age: 21, photo: "https://cdn/a.png", local: "/players/a.png" },
+});
+check("a local copy beats the remote url", withLocal[0].photo, "/players/a.png");
+const remoteOnly = mergeRoster(base, { A: { club: "New", age: 21, photo: "https://cdn/a.png" } });
+check("remote url is used when there is no copy", remoteOnly[0].photo, "https://cdn/a.png");
+
 /* The committed data must be internally consistent. */
 console.log("\ncommitted data");
 check("every player has a value", CURATED.every((p) => typeof p.value === "number"), true);
 check("no duplicate names", new Set(CURATED.map((p) => p.name)).size, CURATED.length);
 check("clubs are derived from the squad", CLUBS.every((c) => CURATED.some((p) => p.club === c)), true);
 
+console.log("\nphoto filenames");
+check("accents are folded", slug("Vinícius Júnior"), "vinicius-junior");
+check("punctuation collapses", slug("Kim Min-jae"), "kim-min-jae");
+check("no leading or trailing dashes", slug("  Rodri  "), "rodri");
+check("mononyms survive", slug("Alisson"), "alisson");
+check("distinct players get distinct files", slug("Luka Modrić") !== slug("Lamine Yamal"), true);
+check("content-type wins over the url", extensionFor("image/jpeg", "https://x/a.png"), "jpg");
+check("falls back to the url", extensionFor(null, "https://x/a.png"), "png");
+check("falls back to jpg", extensionFor(null, "https://x/whatever"), "jpg");
+check("charset suffix is ignored", extensionFor("image/png; charset=binary", "https://x/a"), "png");
+
 console.log("\nrenderRoster");
 const rendered = renderRoster(
   {
-    Zidane: { club: "Real Madrid", age: 30, photo: "http://x/z.png" },
+    Zidane: { club: "Real Madrid", age: 30, photo: "http://x/z.png", local: "/players/zidane.png" },
     "Vinícius Júnior": { club: "Real Madrid", age: 25, photo: null },
     Abbey: { club: "Arsenal", age: 22, photo: "http://x/a.png" },
   },
@@ -108,6 +128,8 @@ check("generated file imports", typeof round.ROSTER, "object");
 check("round-trips every entry", Object.keys(round.ROSTER).length, 3);
 check("round-trips accented keys", round.ROSTER["Vinícius Júnior"]?.age, 25);
 check("round-trips the photo url", round.ROSTER.Zidane?.photo, "http://x/z.png");
+check("round-trips the local path", round.ROSTER.Zidane?.local, "/players/zidane.png");
+check("omits local when there is no copy", "local" in (round.ROSTER.Abbey || {}), false);
 
 /* ------------------------------------------------------------------ *
  *  Dry run of the refresh against a stubbed API-Football.

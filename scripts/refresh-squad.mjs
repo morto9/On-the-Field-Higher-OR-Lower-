@@ -12,7 +12,9 @@
  *
  * Portraits are resolved from API-Football first and Wikipedia second, so
  * the committed file ends up with a URL for as many players as possible
- * and the game needs no photo lookup at runtime at all.
+ * and the game needs no photo lookup at runtime at all. Those URLs point at
+ * someone else's CDN; run scripts/fetch-photos.mjs afterwards to take local
+ * copies. A copy already taken is preserved here unless its source moved.
  *
  *   npm run refresh-squad                    # dry run, prints the diff
  *   npm run refresh-squad -- --write         # applies it
@@ -91,11 +93,19 @@ async function fetchClub(club) {
   for (const person of roster) {
     const curated = matchPlayer(person.name);
     if (!curated) continue; // not one of ours
+    const photo = person.photo || null;
+    const prev = PREVIOUS[curated.name];
+
     found.push({
       name: curated.name,
       club,
       age: Number.isFinite(person.age) ? person.age : null,
-      photo: person.photo || null,
+      photo,
+      /* Keep the downloaded copy when the source image hasn't moved — a
+       * squad refresh should not silently throw away public/players/. If
+       * the remote URL changed, the copy is stale, so drop it and let
+       * fetch-photos pull the new one. */
+      local: prev && prev.local && prev.photo === photo ? prev.local : null,
     });
   }
   return { club, found };
@@ -150,6 +160,8 @@ export function renderRoster(entries, fetchedAt) {
         `age: ${e.age === null ? "null" : e.age}`,
         `photo: ${e.photo ? JSON.stringify(e.photo) : "null"}`,
       ];
+      // Only written once a copy exists, so an untouched roster stays terse.
+      if (e.local) parts.push(`local: ${JSON.stringify(e.local)}`);
       return `  ${JSON.stringify(name)}: { ${parts.join(", ")} },`;
     })
     .join("\n");
@@ -214,6 +226,8 @@ async function main() {
     console.log(`\nAsking Wikipedia for ${noPhoto.length} missing portrait(s)`);
     for (const e of noPhoto) {
       e.photo = await wikipediaPhoto(e.name);
+      const prev = PREVIOUS[e.name];
+      if (prev && prev.local && prev.photo === e.photo) e.local = prev.local;
     }
   }
 
@@ -228,6 +242,7 @@ async function main() {
       if (prev.age !== next.age) changes.push(`~ ${name}: age ${prev.age} -> ${next.age}`);
       if (!prev.photo && next.photo) changes.push(`~ ${name}: portrait found`);
       if (prev.photo && !next.photo) changes.push(`~ ${name}: portrait lost`);
+      if (prev.local && !next.local) changes.push(`~ ${name}: local copy stale, re-fetch needed`);
     }
   }
 

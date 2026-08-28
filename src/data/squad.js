@@ -326,7 +326,10 @@ export function mergeRoster(curated, roster) {
       ...p,
       club: live.club || p.club,
       age: Number.isFinite(live.age) ? live.age : p.age,
-      photo: live.photo || null,
+      /* A downloaded copy under public/ wins over the remote URL it came
+       * from: same image, served from our own origin, so no third-party
+       * CDN gets a say in whether it loads. */
+      photo: live.local || live.photo || null,
     };
   });
 }

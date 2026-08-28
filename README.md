@@ -27,6 +27,7 @@ production deploy needs no environment, no API key and no serverless runtime.
 index.html
 src/data/squad.js   curated: valuations, kits, flags, name matching
 src/data/roster.js  generated: club, age, portrait — committed, not fetched
+public/players/     downloaded portraits, served from our own origin
 src/App.jsx         the game — audio engine and UI
 src/main.jsx        mount
 src/styles.css      the ~50 utility classes the app uses, hand-written
@@ -56,12 +57,18 @@ data is exactly as fresh as the last time you ran a refresh — which is the rig
 trade here, because neither source changes fast.
 
 ```bash
-npm run refresh-squad  -- --write   # API-Football: club, age, portrait
+npm run refresh-squad  -- --write   # API-Football: club, age, portrait URLs
+npm run fetch-photos   -- --write   # download those portraits into public/
 npm run refresh-values -- --write   # Transfermarkt: valuations
 ```
 
-Both are dry runs by default: they print the diff and change nothing until you
-pass `--write`. Read it, run `npm run check`, commit.
+All three are dry runs by default: they print what they would do and change
+nothing until you pass `--write`. Read it, run `npm run check`, commit.
+
+**A fresh clone has no portraits.** `src/data/roster.js` ships empty, so every
+player falls back to the shirt-back monogram until you run the first two
+commands. That is the intended empty state, not a bug — but it is also the most
+likely reason you are reading this section.
 
 #### The split
 
@@ -78,7 +85,7 @@ that actually rot:
 | name, flag, position | hand-written | `squad.js` |
 | club | API-Football, via `refresh-squad` | `roster.js` |
 | age | API-Football | `roster.js` |
-| photo | API-Football, Wikipedia as fallback | `roster.js` |
+| photo | API-Football, Wikipedia as fallback | `roster.js` + `public/players/` |
 
 The two files are also a safety boundary. `refresh-squad` only ever rewrites
 `roster.js`, so a bad run can't reach your valuations; `refresh-values` only ever
@@ -148,24 +155,48 @@ being served so you can fix it against the real page.
 
 ### Photos
 
-Portrait URLs are resolved once by `refresh-squad` and committed into
-`roster.js`: API-Football first, then Wikipedia for whoever it missed (with a
-short title override map for the ambiguous ones — Rodri, Gavi, Vitinha, Ederson,
-Alisson, Endrick, Kim Min-jae). `--no-wikipedia` skips that second pass.
+Two steps, because finding an image and owning a copy of it are different jobs.
 
-Anyone still without a URL falls through to the oversized shirt-back initials, so
-a missing portrait degrades quietly instead of breaking a round.
+**`refresh-squad`** records *where* each portrait lives: API-Football first, then
+Wikipedia for whoever it missed (with a short title override map for the
+ambiguous ones — Rodri, Gavi, Vitinha, Ederson, Alisson, Endrick, Kim Min-jae).
+`--no-wikipedia` skips that second pass. Those URLs point at someone else's CDN.
 
-The committed URLs point at `media.api-sports.io` and Wikipedia's CDN, so a
-browser still loads the images from there — that costs no API quota, but it is a
-hotlink. If you'd rather not depend on either CDN, download the images into
-`public/` and rewrite the URLs; check each source's terms on redistribution
-first.
+**`fetch-photos`** downloads them into `public/players/` and records the local
+path alongside the remote one. `mergeRoster` prefers the local copy, so once
+downloaded the game never touches a third-party host for an image.
 
-**On licensing:** Wikipedia images are mostly CC BY-SA, which requires per-image
-attribution rather than the single line on the intro screen. Taking
-API-Football's portraits first shrinks that exposure to the handful of players it
-misses; `--no-wikipedia` removes it entirely, at the cost of a few monograms.
+That second step is worth doing because a hotlink is a request the host can
+refuse at any time — a referrer check, a CORS rule, a rate limit, a moved file —
+and when it does, an `<img>` simply fails. The monogram comes back and nothing is
+logged anywhere, which makes it a genuinely annoying thing to debug. A committed
+copy cannot be withdrawn.
+
+Filenames are derived from the player's name (`vinicius-junior.jpg`), so they are
+stable across runs and a re-download overwrites rather than accumulating. The
+extension follows the served content-type, not the URL. A download that comes
+back as an HTML page — the usual shape of a hotlink block returning 200 — is
+detected and reported rather than saved as a broken image.
+
+Failures are not fatal at any level: a player whose download failed keeps his
+remote URL and still loads in the browser; a player with no portrait at all falls
+through to the oversized shirt-back initials. Re-running retries only what is
+missing, so the second run is cheap.
+
+Re-running `refresh-squad` later preserves the copies you already have. It only
+drops a local path when the *source* URL changed, which is exactly when the copy
+has gone stale and should be re-fetched.
+
+Commit `public/players/` — that is what makes them permanent. Expect a few MB for
+the current squad. If that bothers you, run the files through an optimiser before
+committing; nothing in the build touches them.
+
+**On licensing:** downloading changes the question from linking to republishing,
+so it is worth a look before you deploy. Wikipedia images are mostly CC BY-SA,
+which wants per-image attribution rather than the single line on the intro
+screen; `--no-wikipedia` avoids them entirely at the cost of a few monograms.
+API-Football's portraits come under their own terms — check what your plan allows
+for redistribution.
 
 ### Sound
 
