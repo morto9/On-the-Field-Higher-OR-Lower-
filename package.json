@@ -8,6 +8,7 @@
     "build": "vite build",
     "preview": "vite preview",
     "check": "node scripts/check-squad.mjs && node scripts/check-values.mjs",
+    "refresh-squad": "node --env-file-if-exists=.env scripts/refresh-squad.mjs",
     "refresh-values": "node scripts/refresh-values.mjs"
   },
   "dependencies": {

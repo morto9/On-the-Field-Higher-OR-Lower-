@@ -25,8 +25,8 @@ function shuffle(list) {
 }
 
 /* Avoid identical neighbours so no round is a coin-flip on a tie. */
-function buildDeck(roster) {
-  const a = shuffle(roster);
+function buildDeck() {
+  const a = shuffle(SQUAD);
   for (let i = 1; i < a.length; i++) {
     if (a[i].value === a[i - 1].value) {
       for (let j = i + 2; j < a.length; j++) {
@@ -47,49 +47,6 @@ const DISPLAY =
   '"Haettenschweiler","Arial Narrow","Oswald","Impact","Anton",system-ui,sans-serif';
 const BODY = '"Inter","Helvetica Neue",Helvetica,Arial,system-ui,sans-serif';
 const LED = '"SF Mono",ui-monospace,"Roboto Mono",Menlo,Consolas,monospace';
-
-/* ------------------------------------------------------------------ *
- *  PHOTOS — resolved by /api/photo, a serverless function that talks to
- *  Wikipedia on the server. Going through our own origin means no
- *  cross-origin rules to depend on and one cached lookup per player for
- *  everybody. Anything that misses falls back to the shirt-back
- *  monogram, so a blocked network never breaks a round.
- *  Only ambiguous article titles need an override.
- * ------------------------------------------------------------------ */
-const WIKI_TITLE = {
-  Rodri: "Rodri (footballer, born 1996)",
-  Gavi: "Gavi (footballer)",
-  Vitinha: "Vitinha (footballer, born 2000)",
-  Ederson: "Ederson (footballer, born 1993)",
-  Alisson: "Alisson Becker",
-  Endrick: "Endrick (footballer, born 2006)",
-  "Kim Min-jae": "Kim Min-jae (footballer)",
-  "Amad Diallo": "Amad Diallo",
-  "Cole Palmer": "Cole Palmer",
-  "Luis Díaz": "Luis Díaz",
-};
-
-const photoCache = new Map();
-
-/* Wikipedia is now the second choice: when /api/squad has answered, players
- * arrive carrying an API-Football portrait already, and this only runs for
- * the ones it had nothing for. */
-async function lookupPhoto(name) {
-  if (photoCache.has(name)) return photoCache.get(name);
-  const title = (WIKI_TITLE[name] || name).replace(/ /g, "_");
-  let src = null;
-  try {
-    const res = await fetch(`/api/photo?title=${encodeURIComponent(title)}`);
-    if (res.ok) {
-      const data = await res.json();
-      src = data.src || null;
-    }
-  } catch (e) {
-    src = null;
-  }
-  photoCache.set(name, src);
-  return src;
-}
 
 /* ------------------------------------------------------------------ *
  *  SOUND — synthesised at runtime. Filtered noise for the crowd,
@@ -512,8 +469,7 @@ function Panel({ player, reveal, shown, dim, photo }) {
 
 export default function App() {
   const [screen, setScreen] = useState("intro"); // intro | play | over
-  const [roster, setRoster] = useState(SQUAD);
-  const [deck, setDeck] = useState(() => buildDeck(SQUAD));
+  const [deck, setDeck] = useState(() => buildDeck());
   const [idx, setIdx] = useState(0);
   const [phase, setPhase] = useState("guess"); // guess | reveal | verdict | shift
   const [pick, setPick] = useState(null);
@@ -524,10 +480,8 @@ export default function App() {
   const [shifted, setShifted] = useState(false);
   const [instant, setInstant] = useState(false);
   const [wide, setWide] = useState(false);
-  const [photos, setPhotos] = useState({});
   const [muted, setMuted] = useState(false);
   const timers = useRef([]);
-  const asked = useRef(new Set());
   const audio = useRef(null);
 
   const sfx = useCallback(() => {
@@ -562,72 +516,14 @@ export default function App() {
     return () => window.removeEventListener("resize", check);
   }, []);
 
-  /* Refresh the roster from API-Football once, on mount. The valuations are
-   * ours either way; what comes back is the current club, the current age
-   * and a licensed portrait. Anything short of a full answer leaves the
-   * built-in array in place, so this can fail silently and the game is
-   * exactly as playable as it was before. */
-  useEffect(() => {
-    let live = true;
-    fetch("/api/squad")
-      .then((res) => (res.ok ? res.json() : null))
-      .then((data) => {
-        if (!live || !data || !Array.isArray(data.players) || !data.players.length) return;
-        setRoster(data.players);
-
-        /* Publish the portraits straight into state. They came back with
-         * the roster, so there is nothing to look up and nothing to wait
-         * for — the first card can already be wearing one. */
-        const shipped = {};
-        for (const p of data.players) {
-          if (!p.photo) continue;
-          shipped[p.name] = p.photo;
-          photoCache.set(p.name, p.photo);
-          asked.current.add(p.name);
-        }
-        if (Object.keys(shipped).length) setPhotos((m) => ({ ...shipped, ...m }));
-      })
-      .catch(() => {});
-    return () => {
-      live = false;
-    };
-  }, []);
-
-  /* Deal off the live roster as soon as it lands — but only between games,
-   * so a deck is never swapped out from under a round in progress. */
-  useEffect(() => {
-    if (screen === "intro") setDeck(buildDeck(roster));
-  }, [roster, screen]);
-
   const trio = [deck[idx], deck[idx + 1], deck[idx + 2] || deck[0]];
   const known = trio[0];
   const mystery = trio[1];
 
-  /* fetch four players ahead so a photo is always ready before its card lands */
-  useEffect(() => {
-    let live = true;
-    deck.slice(idx, idx + 4).forEach((p) => {
-      if (!p || asked.current.has(p.name)) return;
-      asked.current.add(p.name);
-      /* API-Football already gave us a portrait for most of them; only the
-       * stragglers cost a Wikipedia round trip. */
-      if (p.photo) {
-        setPhotos((m) => ({ ...m, [p.name]: p.photo }));
-        return;
-      }
-      lookupPhoto(p.name).then((src) => {
-        if (live && src) setPhotos((m) => ({ ...m, [p.name]: src }));
-      });
-    });
-    return () => {
-      live = false;
-    };
-  }, [idx, deck]);
-
   const start = () => {
     timers.current.forEach(clearTimeout);
     timers.current = [];
-    setDeck(buildDeck(roster));
+    setDeck(buildDeck());
     setIdx(0);
     setScore(0);
     setPick(null);
@@ -686,7 +582,7 @@ export default function App() {
               setShifted(false);
               setIdx((i) => {
                 const next = i + 1;
-                if (next + 3 >= deck.length) setDeck((d) => [...d, ...buildDeck(roster)]);
+                if (next + 3 >= deck.length) setDeck((d) => [...d, ...buildDeck()]);
                 return next;
               });
               setPick(null);
@@ -810,15 +706,15 @@ export default function App() {
             reveal={known.value}
             shown
             dim={phase === "shift"}
-            photo={photos[trio[0].name]}
+            photo={trio[0].photo}
           />
           <Panel
             player={trio[1]}
             reveal={phase === "reveal" ? ticker : mystery.value}
             shown={revealed}
-            photo={photos[trio[1].name]}
+            photo={trio[1].photo}
           />
-          <Panel player={trio[2]} reveal={0} shown={false} photo={photos[trio[2].name]} />
+          <Panel player={trio[2]} reveal={0} shown={false} photo={trio[2].photo} />
         </div>
 
         {/* halfway line */}
@@ -1040,7 +936,7 @@ export default function App() {
               className="mt-7 uppercase"
               style={{ fontSize: 9, letterSpacing: "0.24em", color: "rgba(255,255,255,0.32)" }}
             >
-              Squads &amp; photos via API-Football · values are rounded estimates
+              Squads &amp; photos via API-Football · values via Transfermarkt
             </p>
           </div>
         </div>

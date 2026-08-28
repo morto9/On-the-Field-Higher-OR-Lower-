@@ -1,15 +1,25 @@
 /* ------------------------------------------------------------------ *
  *  SQUAD DATA
  *
- *  Shared by the browser and by api/squad.js, so the roster and the
- *  valuations have exactly one definition.
+ *  Two halves, merged at import into the SQUAD the game deals from.
  *
- *  The array below is both the offline roster and the source of the
- *  curated valuations. API-Football supplies club, position, age,
- *  nationality and photo at runtime; it does not publish market values
- *  (those are Transfermarkt's), so `value` stays hand-maintained here
- *  and is joined onto the live squads by normalised name.
+ *    CURATED (below)   hand-maintained: name, valuation, flag, position
+ *    roster.js         fetched: club, age, photo
+ *
+ *  Nothing here is fetched at runtime. Both halves are committed, so the
+ *  deployed game makes no third-party calls, needs no API key, and cannot
+ *  fail because someone else's service is down. The fetched half is
+ *  refreshed by a command you run:
+ *
+ *    npm run refresh-squad     -- --write   (API-Football: club, age, photo)
+ *    npm run refresh-values    -- --write   (Transfermarkt: valuations)
+ *
+ *  The split is also a safety boundary: refresh-squad only ever rewrites
+ *  roster.js, so a bad run cannot touch the valuations, and refresh-values
+ *  only ever edits the numbers below.
  * ------------------------------------------------------------------ */
+
+import { ROSTER } from "./roster.js";
 
 /* ------------------------------------------------------------------ *
  *  KIT — club colour washes. Two stops per club, used as the panel
@@ -62,8 +72,10 @@ export const KIT = {
 const P = (name, club, pos, age, flag, value) => ({ name, club, pos, age, flag, value });
 
 
-/* Valuations are rounded market estimates, not official figures. */
-export const SQUAD = [
+/* Valuations are rounded market estimates, not official figures.
+ * Refreshed by scripts/refresh-values.mjs, which rewrites only the last
+ * argument of each line. */
+export const CURATED = [
   P("Lamine Yamal", "Barcelona", "RW", 18, "🇪🇸", 180),
   P("Jude Bellingham", "Real Madrid", "AM", 22, "🏴󠁧󠁢󠁥󠁮󠁧󠁿", 180),
   P("Erling Haaland", "Man City", "ST", 25, "🇳🇴", 180),
@@ -209,7 +221,7 @@ function buildIndex(players) {
   return { full, initial, surname };
 }
 
-const INDEX = buildIndex(SQUAD);
+const INDEX = buildIndex(CURATED);
 
 /* Returns the curated entry an API-Football name refers to, or null. */
 export function matchPlayer(name) {
@@ -249,7 +261,7 @@ export const CLUB_QUERY = {
 
 /* The clubs we actually need squads for — derived, so adding a player
  * to SQUAD is the only edit needed to bring their club into the fetch. */
-export const CLUBS = [...new Set(SQUAD.map((p) => p.club))];
+export const CLUBS = [...new Set(CURATED.map((p) => p.club))];
 
 /* ------------------------------------------------------------------ *
  *  FLAGS — API-Football reports nationality as a country name. Covers
@@ -292,3 +304,31 @@ export const POSITION = {
   Midfielder: "MF",
   Attacker: "FW",
 };
+
+/* ------------------------------------------------------------------ *
+ *  THE MERGE
+ *
+ *  What the game actually deals from. The curated entry is the base and
+ *  roster.js overlays the fields API-Football is authoritative about, so
+ *  a player who transferred appears under his new club and his age is
+ *  right for today.
+ *
+ *  An empty or partial roster.js is normal — before the first refresh, or
+ *  for a player the API had nothing for. Those keep their curated club and
+ *  age and fall back to the shirt-back monogram for a portrait, which is
+ *  exactly how the game behaved before any of this existed.
+ * ------------------------------------------------------------------ */
+export function mergeRoster(curated, roster) {
+  return curated.map((p) => {
+    const live = roster[p.name];
+    if (!live) return p;
+    return {
+      ...p,
+      club: live.club || p.club,
+      age: Number.isFinite(live.age) ? live.age : p.age,
+      photo: live.photo || null,
+    };
+  });
+}
+
+export const SQUAD = mergeRoster(CURATED, ROSTER);

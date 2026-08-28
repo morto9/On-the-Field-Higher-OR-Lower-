@@ -17,22 +17,20 @@ npm run build    # -> dist/
 npm run check    # offline tests for the data layer
 ```
 
-`npm run dev` serves the game but not the `/api` functions, so the roster is the
-one committed in `src/data/squad.js` and portraits fall back to the monogram.
-Use `vercel dev` with a `.env` (copy `.env.example`) to exercise the lookups
-locally.
+There is nothing else to configure. The game is a static site: all its data is
+committed, so `npm run dev` is the real thing, not a degraded local mode, and a
+production deploy needs no environment, no API key and no serverless runtime.
 
 ## How it's put together
 
 ```
 index.html
-api/squad.js        live roster from API-Football (Vercel function)
-api/photo.js        Wikipedia photo fallback (Vercel function)
-src/data/squad.js   valuations, kits, flags, name matching
+src/data/squad.js   curated: valuations, kits, flags, name matching
+src/data/roster.js  generated: club, age, portrait — committed, not fetched
 src/App.jsx         the game — audio engine and UI
 src/main.jsx        mount
 src/styles.css      the ~50 utility classes the app uses, hand-written
-scripts/            refresh command and offline checks
+scripts/            the refresh commands and their offline checks
 ```
 
 There's no CSS framework and no state library. `styles.css` covers exactly the
@@ -48,7 +46,24 @@ curve, not for accuracy.
 `KIT` maps each club to the two-stop gradient its panel is painted with. Add a
 club to `SQUAD` and add it to `KIT` too, or the panel falls back to grey.
 
-### The API-Football half
+### Where the data comes from
+
+Both sources are pulled by **commands you run**, never by the running game.
+Nothing is fetched at runtime, from anybody. That means no API key in
+production, no quota spent on traffic, no rate limit to design around, and no
+third-party service that can be down while someone is playing. It also means the
+data is exactly as fresh as the last time you ran a refresh — which is the right
+trade here, because neither source changes fast.
+
+```bash
+npm run refresh-squad  -- --write   # API-Football: club, age, portrait
+npm run refresh-values -- --write   # Transfermarkt: valuations
+```
+
+Both are dry runs by default: they print the diff and change nothing until you
+pass `--write`. Read it, run `npm run check`, commit.
+
+#### The split
 
 **API-Football does not publish market values.** Valuations are Transfermarkt's
 dataset and aren't licensed to them; the closest thing on offer is `/transfers`,
@@ -57,22 +72,41 @@ which gives the fee of a completed move as a display string (`"€45M"`, `"Free"
 guess against stays hand-maintained in `SQUAD`, and the API supplies the fields
 that actually rot:
 
-| field | source |
-| --- | --- |
-| value | curated in `src/data/squad.js` |
-| name, flag, position | curated |
-| club | API-Football — a player who moved appears under his new club |
-| age | API-Football — correct today, not whenever the array was written |
-| photo | API-Football — a licensed portrait |
+| field | source | lives in |
+| --- | --- | --- |
+| value | Transfermarkt, via `refresh-values` | `squad.js` |
+| name, flag, position | hand-written | `squad.js` |
+| club | API-Football, via `refresh-squad` | `roster.js` |
+| age | API-Football | `roster.js` |
+| photo | API-Football, Wikipedia as fallback | `roster.js` |
 
-`api/squad.js` resolves a team id per club, pulls `/players/squads`, and joins
-the result onto `SQUAD` by name. **Only players with a curated valuation are
-returned**, so every card the game deals has a number behind it.
+The two files are also a safety boundary. `refresh-squad` only ever rewrites
+`roster.js`, so a bad run can't reach your valuations; `refresh-values` only ever
+edits the numbers in `squad.js`. `mergeRoster` overlays them at import, naming
+the three fields it takes and ignoring anything else `roster.js` happens to
+carry — a test pins that, so a future refactor can't let generated data reach a
+valuation.
 
-Set `API_FOOTBALL_KEY` (see `.env.example`) to turn it on. Without it — or on a
-timeout, a spent quota, or a join that comes back mostly empty — the function
-answers `source:"static"` with an empty roster and the browser keeps playing off
-the committed array. The game never depends on the API being up.
+`roster.js` being empty is a valid state: before the first refresh, or for a
+player the API had nothing for, the game falls back to the curated club and age
+and a monogram portrait.
+
+#### refresh-squad
+
+Resolves a team id per club, pulls `/players/squads`, and joins onto the curated
+array by name. **Only players with a curated valuation are kept**, so every card
+the game deals has a number behind it. Portraits come from API-Football first and
+Wikipedia second, so the committed file ends up with a URL for as many players as
+possible.
+
+A full run costs about two calls per club — ~46 for the 23 clubs currently in
+`SQUAD`, against a free tier of 100 a day. Spending that on a command a few times
+a season is very different from spending it on traffic.
+
+It refuses to write a `--limit` run (it would drop the clubs it skipped), and
+refuses to overwrite a healthy `roster.js` with a run that resolved less than
+half the squad — a quota wall part-way through shouldn't cost you the file.
+`--force` overrides that if the shrinkage is real.
 
 Names are the fragile part, because the two sources spell them differently.
 `matchPlayer` tries three widths, narrowest first: the full name, then initial
@@ -80,18 +114,9 @@ plus surname (so API-Football's `"L. Yamal"` finds `"Lamine Yamal"`), then the
 surname alone when it's unambiguous in our list. Accents are stripped on both
 sides, so `"Vinicius Junior"` and `"Vinícius Júnior"` land together.
 
-A cold refresh costs about two calls per club — ~46 for the 23 clubs currently in
-`SQUAD`, against a free tier of 100 a day. The response is held at the edge for a
-day (stale-served for a week), and resolved team ids are memoised on the warm
-instance, which halves every refresh after the first.
+#### refresh-values
 
-`npm run check` exercises all of this against a stubbed API, so the join and the
-fallbacks are testable without a key or a network.
-
-### Refreshing the valuations
-
-Market values come from Transfermarkt, who publish no API — so they are pulled
-by a **maintenance command you run**, not by anything at runtime:
+Transfermarkt publishes no API, so this reads the same pages a browser would:
 
 ```bash
 npm run refresh-values                    # dry run, prints the diff
@@ -100,15 +125,14 @@ npm run refresh-values -- --only "Rodri"  # one player
 npm run refresh-values -- --debug "Pedri" # dump the HTML it is being served
 ```
 
-You run it after a transfer window, read the diff, and commit the result.
-Nothing in the deployed app talks to Transfermarkt, and players of the game
-never generate a request to their site.
+It rewrites only the value argument of each matching line, so the comments and
+ordering in `squad.js` survive a refresh untouched. It never writes without
+`--write`, and it refuses to take a value off a row whose name doesn't match
+exactly — a wrong number would be invisible in the game, so a near-miss is
+reported instead of guessed at.
 
-That split is the point. Values move in batches a few times a season, so a live
-lookup would buy nothing over a periodic refresh while adding latency, rate
-limits and an outage surface — and re-serving their feed to the public is a
-different proposition from refreshing a committed constant. Transfermarkt is an
-Axel Springer company, so their database also carries the EU *sui generis*
+Values move in batches a few times a season, so a live lookup would buy nothing
+over a periodic refresh. Transfermarkt is an Axel Springer company, so their database also carries the EU *sui generis*
 database right, which is separate from copyright and aimed squarely at
 substantial extraction. Read their terms before pointing this anywhere public,
 and credit them on screen.
@@ -124,25 +148,24 @@ being served so you can fix it against the real page.
 
 ### Photos
 
-Wikipedia is now the **fallback**, behind API-Football's portraits — it only runs
-for players `/api/squad` had no photo for, or when the API is unavailable.
+Portrait URLs are resolved once by `refresh-squad` and committed into
+`roster.js`: API-Football first, then Wikipedia for whoever it missed (with a
+short title override map for the ambiguous ones — Rodri, Gavi, Vitinha, Ederson,
+Alisson, Endrick, Kim Min-jae). `--no-wikipedia` skips that second pass.
 
-`api/photo.js` asks Wikipedia for a player's lead image and returns the URL.
-The browser never calls Wikipedia directly, so there are no cross-origin rules
-to depend on, and the edge cache means one lookup per player serves everybody.
-Article titles default to the player's name, with a short override map in
-`WIKI_TITLE` for the ambiguous ones (Rodri, Gavi, Vitinha, Ederson, Alisson,
-Endrick, Kim Min-jae).
+Anyone still without a URL falls through to the oversized shirt-back initials, so
+a missing portrait degrades quietly instead of breaking a round.
 
-Any lookup that misses falls through to the oversized shirt-back initials, so a
-bad title or a dead network degrades quietly instead of breaking a round.
+The committed URLs point at `media.api-sports.io` and Wikipedia's CDN, so a
+browser still loads the images from there — that costs no API quota, but it is a
+hotlink. If you'd rather not depend on either CDN, download the images into
+`public/` and rewrite the URLs; check each source's terms on redistribution
+first.
 
 **On licensing:** Wikipedia images are mostly CC BY-SA, which requires per-image
-attribution rather than the single line on the intro screen. Serving
+attribution rather than the single line on the intro screen. Taking
 API-Football's portraits first shrinks that exposure to the handful of players it
-misses, but it doesn't remove it — either surface the `credit` URL `api/photo.js`
-already returns for those, or drop the Wikipedia path once API coverage is good
-enough.
+misses; `--no-wikipedia` removes it entirely, at the cost of a few monograms.
 
 ### Sound
 
@@ -166,7 +189,8 @@ browsers require.
   feel designed.
 - Best streak lives in React state, so it resets on refresh.
 - No share card at full time.
-- Valuations drift between runs of `npm run refresh-values`; nothing refreshes
-  them automatically, by design.
+- All data drifts between refreshes; nothing updates automatically, by design.
+  A scheduled job (a CI workflow on a cron, opening a PR with the diff) would
+  keep it current without putting either source in the request path.
 - Nationality is curated too: `/players/squads` doesn't return it, so a player
   added straight from the API would have no flag.
