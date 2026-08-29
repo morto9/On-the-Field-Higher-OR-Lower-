@@ -55,9 +55,44 @@ const LED = '"SF Mono",ui-monospace,"Roboto Mono",Menlo,Consolas,monospace';
 const LANDING_IMAGE = "/landing.jpg";
 
 /* ------------------------------------------------------------------ *
- *  SOUND — synthesised at runtime. Filtered noise for the crowd,
- *  oscillators for the whistle, ticker and stings. No audio files.
+ *  SOUND
+ *
+ *  Three recordings do the heavy lifting — the crowd bed, the goal, and
+ *  the kick on each call. Everything else is still synthesised: the
+ *  ticker blips, the full-time whistle, the transition whoosh.
+ *
+ *  Samples play through the same master gain as the synth voices, so one
+ *  mute switch covers both. And every one of them falls back to the
+ *  synthesised version it replaced if the file is slow, missing, or the
+ *  browser refuses to decode it — the game should never go quiet because
+ *  of a 404.
  * ------------------------------------------------------------------ */
+
+const SOUNDS = {
+  goal: "/sounds/goal.mp3",
+  kick: "/sounds/soccer-kick.mp3",
+  crowd: "/sounds/fangesang.mp3",
+};
+
+/* Levels are the one thing here that has to be judged by ear. They live
+ * together so they can be tuned in one place. */
+const LEVEL = { goal: 0.85, kick: 0.7, crowd: 0.34 };
+
+/* Bytes are fetched independently of the AudioContext, which cannot exist
+ * until the first tap. Starting the fetch on mount means the file is
+ * usually in the browser cache by the time Kick off is pressed. */
+const rawAudio = new Map();
+function prefetchSound(url) {
+  if (!rawAudio.has(url)) {
+    rawAudio.set(
+      url,
+      fetch(url)
+        .then((r) => (r.ok ? r.arrayBuffer() : null))
+        .catch(() => null)
+    );
+  }
+  return rawAudio.get(url);
+}
 function createAudio() {
   const AC = window.AudioContext || window.webkitAudioContext;
   if (!AC) return null;
@@ -190,75 +225,190 @@ function createAudio() {
     }
   }
 
+  /* The synthesised goal: ball thud, net snap, ripple, then a
+   * filter-opening roar with applause and a detuned horn. Superseded by
+   * goal.mp3 and kept as its fallback. */
+  function synthGoal() {
+    tone(150, { dur: 0.2, peak: 0.3, type: "sine", glide: 55 });
+    const snap = burst({ freq: 2600, q: 1.1, dur: 0.24, peak: 0.16, attack: 0.005 });
+    snap.f.frequency.setValueAtTime(3200, snap.t);
+    snap.f.frequency.linearRampToValueAtTime(1400, snap.t + 0.22);
+    claps(0.06, 0.2, 5, 0.03);
+
+    const roar = burst({ freq: 700, q: 0.4, dur: 2.9, peak: 0.42, attack: 0.42 });
+    roar.f.frequency.setValueAtTime(430, roar.t);
+    roar.f.frequency.linearRampToValueAtTime(1900, roar.t + 0.95);
+    claps(0.35, 1.9, 38, 0.05);
+
+    /* stadium horn under the roar */
+    tone(330, { dur: 1.1, peak: 0.05, type: "sawtooth", delay: 0.28 });
+    tone(332.5, { dur: 1.1, peak: 0.05, type: "sawtooth", delay: 0.28 });
+  }
+
+  /* Named rather than a method: the guess handler picks between correct
+   * and wrong as `(ok ? a.correct : a.wrong)()`, which drops the
+   * receiver, so nothing here may depend on `this`. */
+  function cheer() {
+    resume();
+    playSample(SOUNDS.goal, { gain: LEVEL.goal })
+      .ready()
+      .then((ok) => {
+        if (!ok) synthGoal();
+      });
+  }
+
   let bed = null;
   let swellTimer = null;
+
+  /* The synthesised stand: broadband roar, chatter, waves of cheering.
+   * No longer the default — it is what plays if fangesang.mp3 does not
+   * arrive, so a missing file costs fidelity rather than silence. */
+  function synthBed(on) {
+    if (on && !bed) {
+      resume();
+      const nodes = [];
+      const mk = (type, freq, q, level, lfoRate, lfoDepth) => {
+        const src = ctx.createBufferSource();
+        src.buffer = noise;
+        src.loop = true;
+        const f = ctx.createBiquadFilter();
+        f.type = type;
+        f.frequency.value = freq;
+        f.Q.value = q;
+        const g = ctx.createGain();
+        g.gain.value = 0.0001;
+        const lfo = ctx.createOscillator();
+        lfo.frequency.value = lfoRate;
+        const lg = ctx.createGain();
+        lg.gain.value = lfoDepth;
+        lfo.connect(lg);
+        lg.connect(g.gain);
+        src.connect(f);
+        f.connect(g);
+        g.connect(master);
+        g.gain.setTargetAtTime(level, ctx.currentTime, 1.4);
+        src.start();
+        lfo.start();
+        nodes.push(src, lfo);
+        return g;
+      };
+      const body = mk("bandpass", 620, 0.35, 0.075, 0.11, 0.03);
+      mk("highpass", 2400, 0.5, 0.022, 0.07, 0.009);
+      mk("lowpass", 260, 0.4, 0.03, 0.05, 0.012);
+
+      /* every few seconds the crowd surges, the way a real stand does */
+      const surge = () => {
+        const t = ctx.currentTime;
+        body.gain.cancelScheduledValues(t);
+        body.gain.setTargetAtTime(0.16, t, 0.8);
+        body.gain.setTargetAtTime(0.075, t + 2.2, 1.6);
+        claps(0.4, 2.2, 10, 0.022);
+        swellTimer = setTimeout(surge, 6000 + Math.random() * 7000);
+      };
+      swellTimer = setTimeout(surge, 4000 + Math.random() * 4000);
+
+      bed = { nodes, body };
+    } else if (!on && bed) {
+      const b = bed;
+      bed = null;
+      clearTimeout(swellTimer);
+      swellTimer = null;
+      b.body.gain.cancelScheduledValues(ctx.currentTime);
+      b.body.gain.setTargetAtTime(0, ctx.currentTime, 0.35);
+      setTimeout(() => {
+        b.nodes.forEach((n) => {
+          try {
+            n.stop();
+          } catch (e) {
+            /* already stopped */
+          }
+        });
+      }, 1400);
+    }
+  }
+
+  /* Decoded samples, keyed by url. decodeAudioData detaches the buffer it
+   * is given, so each decode gets its own copy of the bytes. */
+  const decoded = new Map();
+  function sample(url) {
+    if (!decoded.has(url)) {
+      decoded.set(
+        url,
+        prefetchSound(url)
+          .then((bytes) => (bytes ? ctx.decodeAudioData(bytes.slice(0)) : null))
+          .catch(() => null)
+      );
+    }
+    return decoded.get(url);
+  }
+
+  /* Returns the source node so a loop can be stopped later, or null when
+   * the sample is not ready — which is the caller's cue to fall back. */
+  function playSample(url, { gain = 1, loop = false } = {}) {
+    const pending = sample(url);
+    let node = null;
+    let stopped = false;
+
+    pending.then((buf) => {
+      if (!buf || stopped) return;
+      resume();
+      const src = ctx.createBufferSource();
+      src.buffer = buf;
+      src.loop = loop;
+      const g = ctx.createGain();
+      g.gain.value = gain;
+      src.connect(g);
+      g.connect(master);
+      src.start();
+      node = { src, g };
+    });
+
+    return {
+      /* Fade rather than cut: stopping an 18-second crowd loop dead is
+       * audible in a way stopping a 2-second cheer is not. */
+      stop(fade = 0.6) {
+        stopped = true;
+        if (!node) return;
+        const { src, g } = node;
+        node = null;
+        g.gain.cancelScheduledValues(ctx.currentTime);
+        g.gain.setTargetAtTime(0, ctx.currentTime, fade / 3);
+        setTimeout(() => {
+          try {
+            src.stop();
+          } catch (e) {
+            /* already stopped */
+          }
+        }, fade * 1000 + 200);
+      },
+      /* Whether the sample was there in time; false means fall back. */
+      ready: () => pending.then((b) => !!b),
+    };
+  }
+
+  let crowd = null;
 
   return {
     setMuted(m) {
       master.gain.setTargetAtTime(m ? 0 : 0.9, ctx.currentTime, 0.02);
     },
-    /* a full stand: broadband roar, chatter on top, and waves of cheering */
+    /* The stand. A recording when it is available, the synth bed when it
+     * is not — decided once the fetch settles, so a slow network degrades
+     * instead of stalling. */
     ambient(on) {
-      if (on && !bed) {
-        resume();
-        const nodes = [];
-        const mk = (type, freq, q, level, lfoRate, lfoDepth) => {
-          const src = ctx.createBufferSource();
-          src.buffer = noise;
-          src.loop = true;
-          const f = ctx.createBiquadFilter();
-          f.type = type;
-          f.frequency.value = freq;
-          f.Q.value = q;
-          const g = ctx.createGain();
-          g.gain.value = 0.0001;
-          const lfo = ctx.createOscillator();
-          lfo.frequency.value = lfoRate;
-          const lg = ctx.createGain();
-          lg.gain.value = lfoDepth;
-          lfo.connect(lg);
-          lg.connect(g.gain);
-          src.connect(f);
-          f.connect(g);
-          g.connect(master);
-          g.gain.setTargetAtTime(level, ctx.currentTime, 1.4);
-          src.start();
-          lfo.start();
-          nodes.push(src, lfo);
-          return g;
-        };
-        const body = mk("bandpass", 620, 0.35, 0.075, 0.11, 0.03);
-        mk("highpass", 2400, 0.5, 0.022, 0.07, 0.009);
-        mk("lowpass", 260, 0.4, 0.03, 0.05, 0.012);
-
-        /* every few seconds the crowd surges, the way a real stand does */
-        const surge = () => {
-          const t = ctx.currentTime;
-          body.gain.cancelScheduledValues(t);
-          body.gain.setTargetAtTime(0.16, t, 0.8);
-          body.gain.setTargetAtTime(0.075, t + 2.2, 1.6);
-          claps(0.4, 2.2, 10, 0.022);
-          swellTimer = setTimeout(surge, 6000 + Math.random() * 7000);
-        };
-        swellTimer = setTimeout(surge, 4000 + Math.random() * 4000);
-
-        bed = { nodes, body };
-      } else if (!on && bed) {
-        const b = bed;
-        bed = null;
-        clearTimeout(swellTimer);
-        swellTimer = null;
-        b.body.gain.cancelScheduledValues(ctx.currentTime);
-        b.body.gain.setTargetAtTime(0, ctx.currentTime, 0.35);
-        setTimeout(() => {
-          b.nodes.forEach((n) => {
-            try {
-              n.stop();
-            } catch (e) {
-              /* already stopped */
-            }
-          });
-        }, 1400);
+      if (on) {
+        if (crowd) return;
+        const handle = playSample(SOUNDS.crowd, { gain: LEVEL.crowd, loop: true });
+        crowd = handle;
+        handle.ready().then((ok) => {
+          if (!ok && crowd === handle) synthBed(true);
+        });
+      } else {
+        if (crowd) {
+          crowd.stop(0.9);
+          crowd = null;
+        }
+        synthBed(false);
       }
     },
     /* kick off — one sharp blast */
@@ -269,23 +419,18 @@ function createAudio() {
     tick(p) {
       tone(520 + p * 880, { dur: 0.045, peak: 0.04, type: "square" });
     },
-    /* GOAL — ball thuds into the net, the net ripples, the ground erupts */
-    correct() {
+    /* GOAL. The recording when it is loaded, the synthesised cheer when
+     * it is not — the same fallback the crowd bed gets. */
+    correct: cheer,
+    /* Kick off opens on the same cheer, so the game starts on the sound
+     * it rewards you with. */
+    goal: cheer,
+    /* The call itself — a struck ball under MORE / LESS. */
+    kick() {
       resume();
-      tone(150, { dur: 0.2, peak: 0.3, type: "sine", glide: 55 });
-      const snap = burst({ freq: 2600, q: 1.1, dur: 0.24, peak: 0.16, attack: 0.005 });
-      snap.f.frequency.setValueAtTime(3200, snap.t);
-      snap.f.frequency.linearRampToValueAtTime(1400, snap.t + 0.22);
-      claps(0.06, 0.2, 5, 0.03);
-
-      const roar = burst({ freq: 700, q: 0.4, dur: 2.9, peak: 0.42, attack: 0.42 });
-      roar.f.frequency.setValueAtTime(430, roar.t);
-      roar.f.frequency.linearRampToValueAtTime(1900, roar.t + 0.95);
-      claps(0.35, 1.9, 38, 0.05);
-
-      /* stadium horn under the roar */
-      tone(330, { dur: 1.1, peak: 0.05, type: "sawtooth", delay: 0.28 });
-      tone(332.5, { dur: 1.1, peak: 0.05, type: "sawtooth", delay: 0.28 });
+      playSample(SOUNDS.kick, { gain: LEVEL.kick }).ready().then((ok) => {
+        if (!ok) tone(160, { dur: 0.16, peak: 0.22, type: "sine", glide: 60 });
+      });
     },
     /* FULL TIME — three blasts, and the crowd falls away */
     wrong() {
@@ -310,6 +455,7 @@ function createAudio() {
     },
   };
 }
+
 
 /* ------------------------------------------------------------------ */
 
@@ -549,6 +695,12 @@ export default function App() {
 
   useEffect(() => () => timers.current.forEach(clearTimeout), []);
 
+  /* Pull the audio down early. The AudioContext cannot exist before the
+   * first tap, but the bytes can already be in cache by then. */
+  useEffect(() => {
+    for (const url of Object.values(SOUNDS)) prefetchSound(url);
+  }, []);
+
   useEffect(() => {
     const check = () => setWide(window.innerWidth >= 880);
     check();
@@ -577,7 +729,7 @@ export default function App() {
     const a = sfx();
     if (a) {
       a.setMuted(muted);
-      a.whistle();
+      a.goal();
       a.ambient(true);
     }
   };
@@ -588,6 +740,7 @@ export default function App() {
     setPhase("reveal");
 
     const a = sfx();
+    if (a) a.kick();
     const target = mystery.value;
     const t0 = performance.now();
     const DUR = 950;

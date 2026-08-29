@@ -288,17 +288,30 @@ licensed, or one under terms that permit this.
 
 ### Sound
 
-Everything is synthesised at runtime in the Web Audio API. No audio files.
+Three recordings in `public/sounds/`, the rest still synthesised at runtime:
 
-- **Crowd bed** — three noise layers (rumble, roar, chatter) each drifting on
-  its own LFO, with a surge every 6–13 seconds
-- **Goal** — ball thud, net snap, ripple, then a filter-opening roar with
-  scattered applause and a detuned stadium horn
-- **Full time** — three pea-whistle blasts, crowd filtered away behind them
-- **Ticker** — one blip per €1m, pitch climbing with the reveal
+| | sound |
+| --- | --- |
+| Kick off, and every correct call | `goal.mp3` |
+| MORE / LESS | `soccer-kick.mp3` |
+| Crowd bed, looped | `fangesang.mp3` |
+| Full time | three synthesised pea-whistle blasts |
+| Ticker | one synthesised blip per €1m, pitch climbing with the reveal |
+| Round transition | a synthesised whoosh |
 
-The audio context is created on the first tap of Kick off, which is what
-browsers require.
+Samples play through the same master gain as the synth voices, so the one mute
+switch covers both, and each **falls back to the synthesised voice it replaced**
+if the file is slow, missing, or the browser won't decode it — the version of
+the crowd bed and the goal that used to be the default are still in there doing
+exactly that. A 404 costs fidelity, never silence.
+
+The bytes are fetched on mount but only decoded once the AudioContext exists,
+which browsers won't allow before the first tap. In practice the files are in
+cache by the time Kick off is pressed. They add ~630kB, nearly all of it the
+18-second crowd loop, and none of it blocks first paint.
+
+Levels live in one `LEVEL` constant at the top of `App.jsx` — they are the part
+that has to be judged by ear, so tune them there.
 
 ## Known gaps
 
