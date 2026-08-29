@@ -422,10 +422,8 @@ function createAudio() {
     /* GOAL. The recording when it is loaded, the synthesised cheer when
      * it is not — the same fallback the crowd bed gets. */
     correct: cheer,
-    /* Kick off opens on the same cheer, so the game starts on the sound
-     * it rewards you with. */
-    goal: cheer,
-    /* The call itself — a struck ball under MORE / LESS. */
+    /* A struck ball: under MORE / LESS, and again on Kick off, so the
+     * game opens on the same sound it answers every call with. */
     kick() {
       resume();
       playSample(SOUNDS.kick, { gain: LEVEL.kick }).ready().then((ok) => {
@@ -729,7 +727,7 @@ export default function App() {
     const a = sfx();
     if (a) {
       a.setMuted(muted);
-      a.goal();
+      a.kick();
       a.ambient(true);
     }
   };

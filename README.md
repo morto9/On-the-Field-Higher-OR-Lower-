@@ -292,8 +292,8 @@ Three recordings in `public/sounds/`, the rest still synthesised at runtime:
 
 | | sound |
 | --- | --- |
-| Kick off, and every correct call | `goal.mp3` |
-| MORE / LESS | `soccer-kick.mp3` |
+| Every correct call | `goal.mp3` |
+| MORE / LESS, and Kick off | `soccer-kick.mp3` |
 | Crowd bed, looped | `fangesang.mp3` |
 | Full time | three synthesised pea-whistle blasts |
 | Ticker | one synthesised blip per €1m, pitch climbing with the reveal |
