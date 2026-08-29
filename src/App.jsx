@@ -78,6 +78,11 @@ const SOUNDS = {
  * together so they can be tuned in one place. */
 const LEVEL = { goal: 0.85, kick: 0.7, crowd: 0.34 };
 
+/* Seconds between the kick-off strike and the cheer behind it. Measured
+ * against the two files rather than guessed: the impact is at 0.05s and
+ * has decayed by 0.1s, and the cheer needs 0.3s to build. */
+const KICKOFF_CHEER = 0.22;
+
 /* Bytes are fetched independently of the AudioContext, which cannot exist
  * until the first tap. Starting the fetch on mount means the file is
  * usually in the browser cache by the time Kick off is pressed. */
@@ -248,12 +253,22 @@ function createAudio() {
   /* Named rather than a method: the guess handler picks between correct
    * and wrong as `(ok ? a.correct : a.wrong)()`, which drops the
    * receiver, so nothing here may depend on `this`. */
-  function cheer() {
+  function cheer(when = 0) {
     resume();
-    playSample(SOUNDS.goal, { gain: LEVEL.goal })
+    playSample(SOUNDS.goal, { gain: LEVEL.goal, when })
       .ready()
       .then((ok) => {
-        if (!ok) synthGoal();
+        if (!ok) setTimeout(synthGoal, when * 1000);
+      });
+  }
+
+  /* The struck ball. Named for the same reason cheer is. */
+  function strike() {
+    resume();
+    playSample(SOUNDS.kick, { gain: LEVEL.kick })
+      .ready()
+      .then((ok) => {
+        if (!ok) tone(160, { dur: 0.16, peak: 0.22, type: "sine", glide: 60 });
       });
   }
 
@@ -344,7 +359,7 @@ function createAudio() {
 
   /* Returns the source node so a loop can be stopped later, or null when
    * the sample is not ready — which is the caller's cue to fall back. */
-  function playSample(url, { gain = 1, loop = false } = {}) {
+  function playSample(url, { gain = 1, loop = false, when = 0 } = {}) {
     const pending = sample(url);
     let node = null;
     let stopped = false;
@@ -359,7 +374,9 @@ function createAudio() {
       g.gain.value = gain;
       src.connect(g);
       g.connect(master);
-      src.start();
+      /* Scheduled on the audio clock rather than a timer, so a delayed
+       * cue lands where it was meant to even under a busy main thread. */
+      src.start(when ? ctx.currentTime + when : undefined);
       node = { src, g };
     });
 
@@ -422,13 +439,18 @@ function createAudio() {
     /* GOAL. The recording when it is loaded, the synthesised cheer when
      * it is not — the same fallback the crowd bed gets. */
     correct: cheer,
-    /* A struck ball: under MORE / LESS, and again on Kick off, so the
-     * game opens on the same sound it answers every call with. */
-    kick() {
-      resume();
-      playSample(SOUNDS.kick, { gain: LEVEL.kick }).ready().then((ok) => {
-        if (!ok) tone(160, { dur: 0.16, peak: 0.22, type: "sine", glide: 60 });
-      });
+    /* The call itself — a struck ball under MORE / LESS. */
+    kick: strike,
+    /* Kick off: the strike, then the crowd behind it.
+     *
+     * The delay is short on purpose. soccer-kick.mp3 is a 0.1s impact
+     * followed by 0.7s of near-silence, and goal.mp3 spends its first
+     * 0.3s building, so starting the cheer when the kick file *ends*
+     * leaves an audible hole. Coming in just after the impact decays
+     * reads as one event: struck, then the ground goes up. */
+    kickoff() {
+      strike();
+      cheer(KICKOFF_CHEER);
     },
     /* FULL TIME — three blasts, and the crowd falls away */
     wrong() {
@@ -727,7 +749,7 @@ export default function App() {
     const a = sfx();
     if (a) {
       a.setMuted(muted);
-      a.kick();
+      a.kickoff();
       a.ambient(true);
     }
   };

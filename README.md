@@ -292,8 +292,9 @@ Three recordings in `public/sounds/`, the rest still synthesised at runtime:
 
 | | sound |
 | --- | --- |
+| Kick off | `soccer-kick.mp3`, then `goal.mp3` 0.22s behind it |
 | Every correct call | `goal.mp3` |
-| MORE / LESS, and Kick off | `soccer-kick.mp3` |
+| MORE / LESS | `soccer-kick.mp3` |
 | Crowd bed, looped | `fangesang.mp3` |
 | Full time | three synthesised pea-whistle blasts |
 | Ticker | one synthesised blip per €1m, pitch climbing with the reveal |
@@ -311,7 +312,13 @@ cache by the time Kick off is pressed. They add ~630kB, nearly all of it the
 18-second crowd loop, and none of it blocks first paint.
 
 Levels live in one `LEVEL` constant at the top of `App.jsx` — they are the part
-that has to be judged by ear, so tune them there.
+that has to be judged by ear, so tune them there. `KICKOFF_CHEER` next to it is
+the gap between the kick-off strike and the cheer behind it: the impact in
+`soccer-kick.mp3` lands at 0.05s and has decayed by 0.1s, while `goal.mp3`
+spends its first 0.3s building, so 0.22s reads as one event rather than two.
+Waiting for the kick file to finish would leave a 0.7s hole. The cheer is
+scheduled on the audio clock, not a timer, so it lands where it was meant to
+even under a busy main thread.
 
 ## Known gaps
 
