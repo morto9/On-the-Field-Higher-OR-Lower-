@@ -69,7 +69,7 @@ const LANDING_IMAGE = "/landing.jpg";
  * ------------------------------------------------------------------ */
 
 const SOUNDS = {
-  goal: "/sounds/goal.mp3",
+  goal: "/sounds/goals.mp3",
   kick: "/sounds/soccer-kick.mp3",
   crowd: "/sounds/fangesang.mp3",
 };
@@ -232,7 +232,7 @@ function createAudio() {
 
   /* The synthesised goal: ball thud, net snap, ripple, then a
    * filter-opening roar with applause and a detuned horn. Superseded by
-   * goal.mp3 and kept as its fallback. */
+   * goals.mp3 and kept as its fallback. */
   function synthGoal() {
     tone(150, { dur: 0.2, peak: 0.3, type: "sine", glide: 55 });
     const snap = burst({ freq: 2600, q: 1.1, dur: 0.24, peak: 0.16, attack: 0.005 });
@@ -444,7 +444,7 @@ function createAudio() {
     /* Kick off: the strike, then the crowd behind it.
      *
      * The delay is short on purpose. soccer-kick.mp3 is a 0.1s impact
-     * followed by 0.7s of near-silence, and goal.mp3 spends its first
+     * followed by 0.7s of near-silence, and goals.mp3 spends its first
      * 0.3s building, so starting the cheer when the kick file *ends*
      * leaves an audible hole. Coming in just after the impact decays
      * reads as one event: struck, then the ground goes up. */
